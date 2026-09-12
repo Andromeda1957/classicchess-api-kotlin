@@ -6,6 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.Request
@@ -22,6 +24,26 @@ data class ApplicationResponse(val status: Int, val data: JsonObject, val retryA
  */
 class ApplicationClient(private val options: ClientOptions = ClientOptions()) : Closeable {
     private val transport = Transport(options)
+
+    suspend fun accountMe(token: String): ApplicationResponse = request("/api/v1/account/me/", token = token)
+    suspend fun accountCollections(token: String): ApplicationResponse = request("/api/v1/account/collections/", token = token)
+    suspend fun accountCreateCollection(name: String, token: String): ApplicationResponse =
+        request("/api/v1/account/collections/", "POST", buildJsonObject { put("name", name) }.toString(), token)
+    suspend fun accountImportPublicPlayerGames(archivePlayer: String, token: String, name: String? = null,
+        collectionId: Long? = null, since: Int? = null, until: Int? = null): ApplicationResponse =
+        request("/api/v1/account/collections/import/", "POST", buildJsonObject {
+            put("source", "public_player_games"); put("archive_player", archivePlayer)
+            name?.let { put("name", it) }; collectionId?.let { put("collection_id", it) }
+            since?.let { put("since", it) }; until?.let { put("until", it) }
+        }.toString(), token)
+
+    /** Binary notebook requests preserve their original bytes and media type. */
+    suspend fun requestBytes(path: String, body: ByteArray, token: String? = null, method: String = "POST",
+        contentType: String = "application/octet-stream", timeoutMillis: Long? = null): ApplicationResponse {
+        if (body.size > 128 * 1024 * 1024) throw ApiException("API request exceeds 128 MiB.", "request_too_large")
+        if (contentType.length > 200 || '\r' in contentType || '\n' in contentType) throw ApiException("Invalid content type.", "invalid_request")
+        return execute(path, method, body.toRequestBody(contentType.toMediaType()), token, timeoutMillis)
+    }
 
     suspend fun request(
         path: String,

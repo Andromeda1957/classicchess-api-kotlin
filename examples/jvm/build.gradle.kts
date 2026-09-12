@@ -3,7 +3,6 @@ plugins {
     application
 }
 repositories {
-    maven { url = uri(providers.gradleProperty("apiRepository").getOrElse("../../build/repository")) }
     mavenCentral()
 }
 dependencies { implementation("com.classicchess:api-client:0.1.0") }

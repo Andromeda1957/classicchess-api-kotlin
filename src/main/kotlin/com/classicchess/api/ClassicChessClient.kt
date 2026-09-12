@@ -10,10 +10,14 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import okhttp3.HttpUrl
 
 data class PageOptions(val page: Int? = null, val pageSize: Int? = null)
 data class MasterGameFilters(val query: String, val page: Int? = null, val pageSize: Int? = null)
+data class MasterStatsFilters(val query: String? = null, val player: String? = null, val opponent: String? = null, val mode: String? = null)
+data class ExplorerFilters(val fen: String? = null, val play: String? = null, val moves: Int = 12,
+    val topGames: Int? = null, val sourceType: String? = null, val sourceKey: String? = null)
 data class PublicGameFilters(
     val query: String? = null, val archivePlayer: String? = null, val archiveEvent: String? = null,
     val since: Int? = null, val until: Int? = null, val sort: String? = null,
@@ -58,6 +62,29 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
     val baseUrl: String get() = transport.base.toString().removeSuffix("/")
 
     suspend fun discovery(): ApiDiscovery = read("/api/v1/", ApiDiscovery.serializer())
+    suspend fun players(query: String, limit: Int = 10): JsonObject =
+        read("/api/v1/players/", JsonObject.serializer(), mapOf("q" to query, "limit" to limit))
+    suspend fun masterStats(filters: MasterStatsFilters): JsonObject {
+        if (!filters.query.isNullOrEmpty()) return read("/api/v1/stats/", JsonObject.serializer(), mapOf("q" to filters.query))
+        val mode = filters.mode ?: if (!filters.opponent.isNullOrEmpty()) "head_to_head" else "summary"
+        if (filters.player.isNullOrEmpty() || mode == "head_to_head" && filters.opponent.isNullOrEmpty()) {
+            throw ApiException("Use a stats query or player; head_to_head requires opponent.", "invalid_query")
+        }
+        return read("/api/v1/stats/", JsonObject.serializer(), mapOf("player" to filters.player, "opponent" to filters.opponent, "mode" to mode))
+    }
+    suspend fun explorer(filters: ExplorerFilters = ExplorerFilters()): JsonObject =
+        read("/api/v1/opening-explorer/", JsonObject.serializer(), mapOf("fen" to filters.fen, "play" to filters.play,
+            "moves" to filters.moves, "topGames" to filters.topGames, "source_type" to filters.sourceType, "source_key" to filters.sourceKey))
+    suspend fun explorerSources(): JsonObject = read("/api/v1/opening-explorer/sources/", JsonObject.serializer())
+    suspend fun exportMasterGames(query: String? = null, tokens: List<String>? = null,
+        format: String = "pgn", pgnInJson: Boolean = true): String {
+        if (tokens.isNullOrEmpty() && query.isNullOrEmpty() || tokens != null && tokens.size !in 1..300) {
+            throw ApiException("Use a query or between 1 and 300 game tokens.", "invalid_export")
+        }
+        return pgn("/api/v1/games/export/", mapOf("q" to if (tokens.isNullOrEmpty()) query else null,
+            "tokens" to tokens?.joinToString(",") { masterToken(it) }, "format" to format,
+            "pgnInJson" to if (format == "ndjson") pgnInJson else null))
+    }
     suspend fun masterGames(filters: MasterGameFilters): MasterGamePage =
         read("/api/v1/games/", MasterGamePage.serializer(), masterQuery(filters))
     suspend fun masterGame(token: String): MasterGameDetail =
@@ -97,10 +124,12 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
     suspend fun publicPgn(token: String): String = pgn("/api/v1/public/games/${gameToken(token)}/pgn/")
 
     /** The service caps this export at 300 games. Iterate games and batch tokens to export larger archives. */
-    suspend fun exportPublicGames(filters: PublicGameFilters = PublicGameFilters(), tokens: List<String>? = null): String {
+    suspend fun exportPublicGames(filters: PublicGameFilters = PublicGameFilters(), tokens: List<String>? = null,
+        format: String = "pgn", pgnInJson: Boolean = true): String {
         if (tokens != null && tokens.size !in 1..300) throw ApiException("Export between 1 and 300 tokens.", "invalid_export")
         return pgn("/api/v1/public/games/export/", gameQuery(filters.copy(page = null, pageSize = null))
-            + mapOf("tokens" to tokens?.joinToString(",") { gameToken(it) }))
+            + mapOf("tokens" to tokens?.joinToString(",") { gameToken(it) }, "format" to format,
+                "pgnInJson" to if (format == "ndjson") pgnInJson else null))
     }
     suspend fun annotatedGames(bookSlug: String, page: PageOptions = PageOptions()): AnnotatedGamePage =
         read("/api/v1/annotated/books/${segment(bookSlug)}/games/", AnnotatedGamePage.serializer(), pageQuery(page))
@@ -120,6 +149,13 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
             val result = decode(url, AnnotatedGamePage.serializer())
             Page(result.results, result.next)
         }
+
+    /** Combine returned api_pgn URLs in order, confined to this client's public API. */
+    suspend fun pgnTextForGames(pgnUrls: Iterable<String>): String {
+        val games = mutableListOf<String>()
+        for (url in pgnUrls) games.add(transport.read(transport.safeUrl(url), "application/x-chess-pgn").trim())
+        return if (games.isEmpty()) "" else games.joinToString("\n\n") + "\n"
+    }
 
     private suspend fun <T> read(path: String, serializer: DeserializationStrategy<T>, params: Map<String, Any?> = emptyMap()): T =
         decode(transport.url(path, params), serializer)

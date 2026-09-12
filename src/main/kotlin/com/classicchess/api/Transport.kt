@@ -87,6 +87,8 @@ internal class Transport(private val options: ClientOptions) : Closeable {
             || url.username.isNotEmpty() || url.password.isNotEmpty() || url.fragment != null
             || !(url.encodedPath == "/api/v1/" || url.encodedPath.startsWith("/api/v1/public/")
                 || url.encodedPath.startsWith("/api/v1/annotated/")
+                || url.encodedPath in listOf("/api/v1/players/", "/api/v1/stats/", "/api/v1/games/export/",
+                    "/api/v1/opening-explorer/", "/api/v1/opening-explorer/sources/")
                 || masterReadPath.matches(url.encodedPath))) {
             throw ApiException("Refused a link outside the configured public API.", "unsafe_url")
         }
