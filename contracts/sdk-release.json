@@ -1,0 +1,7 @@
+{
+  "license": "MIT",
+  "license_url": "https://opensource.org/license/mit",
+  "npm_package": "@classicchess/api",
+  "maven_group": "com.classicchess",
+  "maven_artifact": "api-client"
+}
