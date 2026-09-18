@@ -108,5 +108,12 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
     companion object {
         private const val MAX_JSON_BYTES = 10 * 1024 * 1024
         private val PRIVATE_PATH = Regex("^/(?:api/v1/(?:account/|desktop/|mobile/(?:notebooks/|position-scan/))|cast/api/mobile/)")
+
+        /** Credential audience for application routers; request() still validates URLs and HTTPS. */
+        fun isPrivateApiPath(path: String): Boolean = try {
+            PRIVATE_PATH.containsMatchIn(URI(path).rawPath.orEmpty())
+        } catch (_: Exception) {
+            false
+        }
     }
 }
