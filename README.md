@@ -194,4 +194,4 @@ The other maintained SDKs have the same API capabilities:
 See the [API reference](https://classicchess.com/api/) for endpoint permissions,
 response fields, rate limits and resource attribution. The SDK license covers
 its software; chess resources retain their own stated reuse terms.
-Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues and pull requests are welcome; see [CONTRIBUTING.md](https://github.com/Andromeda1957/classicchess-api-kotlin/blob/main/CONTRIBUTING.md).
