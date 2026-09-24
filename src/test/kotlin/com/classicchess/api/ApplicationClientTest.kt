@@ -84,6 +84,30 @@ class ApplicationClientTest {
         assertEquals(1, server.requestCount)
     }
 
+    @Test fun staleKeepAliveConnectionsRetryReadsButNeverWrites() = runBlocking {
+        // A server that has dropped an idle keep-alive connection closes it as
+        // soon as the next request arrives. Reads recover on a fresh connection.
+        server.enqueue(MockResponse().setBody("""{"first":true}"""))
+        assertEquals(200, client.request("/api/v1/mobile/home/").status)
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        server.enqueue(MockResponse().setBody("""{"second":true}"""))
+        val read = client.request("/api/v1/mobile/home/")
+        assertEquals(200, read.status)
+        assertEquals("true", read.data["second"].toString())
+        assertEquals(3, server.requestCount)
+        repeat(3) { assertEquals("GET", server.takeRequest().method) }
+
+        // A write is never replayed: the caller decides, with its own idempotency key.
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        server.enqueue(MockResponse().setBody("""{"replayed":true}"""))
+        val failure = assertFailsWith<ApiException> {
+            client.request("/api/v1/account/collections/", "POST", "{}", "test-device")
+        }
+        assertEquals("network_error", failure.code)
+        assertEquals(4, server.requestCount)
+        assertEquals("POST", server.takeRequest().method)
+    }
+
     @Test fun redirectsBoundsAndCancellationRemainEnforced() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "https://other.invalid/"))
         assertEquals(302, client.request("/api/v1/account/me/", token = "test-device").status)

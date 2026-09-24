@@ -45,6 +45,14 @@ internal fun segment(value: String): String {
     return value
 }
 
+/** The username of the account that imported a game, from its page address; safe in a URL path. */
+internal fun usernameSegment(value: String): String {
+    if (!Regex("[A-Za-z0-9@.+_-]{1,150}").matches(value) || value == "." || value == "..") {
+        throw ApiException("Use the exact username from the game page address.", "invalid_identifier")
+    }
+    return value
+}
+
 internal fun gameToken(value: String): String {
     val parts = value.split('/')
     if (parts.size !in 1..2) throw ApiException("Use a game token, not a URL.", "invalid_identifier")
@@ -56,6 +64,12 @@ internal class Transport(private val options: ClientOptions) : Closeable {
     val base: HttpUrl = options.baseUrl.toHttpUrlOrNull()
         ?: throw ApiException("Invalid API origin.", "invalid_options")
     private val client: OkHttpClient
+    /**
+     * Reads recover when a server has already closed an idle keep-alive
+     * connection that is still in the pool; OkHttp replays them once on a
+     * fresh connection. Writes use [client], which never replays a request.
+     */
+    private val readClient: OkHttpClient
     @Volatile private var closed = false
 
     init {
@@ -71,6 +85,7 @@ internal class Transport(private val options: ClientOptions) : Closeable {
             .connectTimeout(options.timeoutMillis, TimeUnit.MILLISECONDS)
             .readTimeout(options.timeoutMillis, TimeUnit.MILLISECONDS)
             .build()
+        readClient = client.newBuilder().retryOnConnectionFailure(true).build()
     }
 
     fun url(path: String, query: Map<String, Any?> = emptyMap()): HttpUrl {
@@ -88,7 +103,7 @@ internal class Transport(private val options: ClientOptions) : Closeable {
             || !(url.encodedPath == "/api/v1/" || url.encodedPath.startsWith("/api/v1/public/")
                 || url.encodedPath.startsWith("/api/v1/annotated/")
                 || url.encodedPath in listOf("/api/v1/players/", "/api/v1/stats/", "/api/v1/games/export/",
-                    "/api/v1/opening-explorer/", "/api/v1/opening-explorer/sources/")
+                    "/api/v1/opening-explorer/", "/api/v1/opening-explorer/sources/", "/api/v1/tablebase/")
                 || masterReadPath.matches(url.encodedPath))) {
             throw ApiException("Refused a link outside the configured public API.", "unsafe_url")
         }
@@ -116,7 +131,8 @@ internal class Transport(private val options: ClientOptions) : Closeable {
             throw ApiException("Use a timeout between 1 ms and ten minutes.", "invalid_options")
         }
         // Derived clients share the dispatcher and connection pool. Long scanner calls also need a longer read deadline.
-        val requestClient = if (timeoutMillis == null) client else client.newBuilder()
+        val methodClient = if (request.method == "GET" || request.method == "HEAD") readClient else client
+        val requestClient = if (timeoutMillis == null) methodClient else methodClient.newBuilder()
             .readTimeout(timeoutMillis, TimeUnit.MILLISECONDS).writeTimeout(timeoutMillis, TimeUnit.MILLISECONDS).build()
         val call = requestClient.newCall(request.newBuilder().header("User-Agent", options.userAgent).build())
         if (timeoutMillis != null) call.timeout().timeout(timeoutMillis, TimeUnit.MILLISECONDS)
@@ -127,7 +143,7 @@ internal class Transport(private val options: ClientOptions) : Closeable {
             }
             override fun onResponse(call: Call, response: Response) {
                 try {
-                    val text = response.use {
+                    val bytes = response.use {
                         val body = response.body
                         val buffer = Buffer()
                         var bytes = 0L
@@ -137,9 +153,10 @@ internal class Transport(private val options: ClientOptions) : Closeable {
                             bytes += count
                             if (bytes > options.maxResponseBytes) throw ApiException("Response exceeds maxResponseBytes.", "response_too_large", response.code)
                         }
-                        buffer.readUtf8()
+                        buffer.readByteArray()
                     }
-                    if (continuation.isActive) continuation.resume(WireResponse(response.code, text, response.header("Retry-After")))
+                    if (continuation.isActive) continuation.resume(WireResponse(response.code, bytes,
+                        response.header("Retry-After"), response.header("Content-Type"), response.header("Content-Disposition")))
                 } catch (error: Exception) {
                     if (continuation.isActive) continuation.resumeWithException(
                         if (error is ApiException) error else networkError(error)
@@ -171,4 +188,13 @@ internal class Transport(private val options: ClientOptions) : Closeable {
     }
 }
 
-internal data class WireResponse(val status: Int, val text: String, val retryAfter: String?)
+/** One bounded reply. [bytes] keeps GIF, PGN and Notebook files exact; [text] decodes it as UTF-8. */
+internal class WireResponse(
+    val status: Int,
+    val bytes: ByteArray,
+    val retryAfter: String?,
+    val contentType: String? = null,
+    val contentDisposition: String? = null,
+) {
+    val text: String by lazy { bytes.toString(Charsets.UTF_8) }
+}

@@ -23,6 +23,7 @@ data class PublicGameFilters(
     val since: Int? = null, val until: Int? = null, val sort: String? = null,
     val page: Int? = null, val pageSize: Int? = null,
 )
+data class GalleryFilters(val query: String? = null, val page: Int? = null, val pageSize: Int? = null)
 data class IterationOptions(val limit: Long? = null, val maxPages: Int = 100_000)
 
 private fun pageQuery(options: PageOptions): Map<String, Any?> {
@@ -46,6 +47,13 @@ private fun masterQuery(filters: MasterGameFilters): Map<String, Any?> {
         throw ApiException("Use a nonempty MasterDB query of at most 120 characters.", "invalid_query")
     }
     return pageQuery(PageOptions(filters.page, filters.pageSize)) + ("q" to query)
+}
+
+private fun siteSearchQuery(query: String): String {
+    if (query.isBlank() || query.length > 240 || query.codePointCount(0, query.length) > 120) {
+        throw ApiException("Use a search query of 1 to 120 characters.", "invalid_query")
+    }
+    return query
 }
 
 private fun masterToken(token: String): String {
@@ -115,6 +123,32 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
     suspend fun publicEvents(query: String? = null): PublicEvents =
         read("/api/v1/public/events/", PublicEvents.serializer(), mapOf("q" to query))
     suspend fun eventNames(query: String? = null): List<String> = publicEvents(query).results.map { it.name }
+    suspend fun publicEvent(slug: String): PublicEventDetail =
+        read("/api/v1/public/events/${segment(slug)}/", PublicEventDetail.serializer())
+    suspend fun publicEventAbout(slug: String): PublicEventAbout =
+        read("/api/v1/public/events/${segment(slug)}/about/", PublicEventAbout.serializer())
+    suspend fun gallery(filters: GalleryFilters = GalleryFilters()): GalleryPage =
+        read("/api/v1/public/gallery/", GalleryPage.serializer(),
+            pageQuery(PageOptions(filters.page, filters.pageSize)) + ("q" to filters.query))
+    suspend fun galleryPhoto(photoId: String): GalleryPhotoDetail =
+        read("/api/v1/public/gallery/${segment(photoId)}/", GalleryPhotoDetail.serializer())
+    suspend fun beginnerGames(): PublicBeginnerGames = read("/api/v1/public/beginner-games/", PublicBeginnerGames.serializer())
+    /** Today's Game of the Day; `game` is null when none can be published. */
+    suspend fun dailyGame(): PublicDailyGame = read("/api/v1/public/daily/", PublicDailyGame.serializer())
+    /** The site search box's grouped preview of players, events and games. */
+    suspend fun siteSearch(query: String): SiteSearchPreview =
+        read("/api/v1/public/search/", SiteSearchPreview.serializer(), mapOf("q" to siteSearchQuery(query)))
+    /** One 50-row page of one site search result kind: games, events or players. */
+    suspend fun siteSearchPage(query: String, kind: String, page: Int = 1): SiteSearchPage {
+        if (kind !in listOf("games", "events", "players")) throw ApiException("kind must be games, events, or players.", "invalid_query")
+        if (page < 1) throw ApiException("page must be positive.", "invalid_pagination")
+        return read("/api/v1/public/search/", SiteSearchPage.serializer(),
+            mapOf("q" to siteSearchQuery(query), "kind" to kind, "page" to page))
+    }
+    suspend fun tablebase(fen: String): TablebaseProbe {
+        if (fen.isBlank() || fen.toByteArray(Charsets.UTF_8).size > 200) throw ApiException("Use a FEN of at most 200 bytes.", "invalid_query")
+        return read("/api/v1/tablebase/", TablebaseProbe.serializer(), mapOf("fen" to fen))
+    }
     suspend fun annotatedBooks(): AnnotatedBooks = read("/api/v1/annotated/books/", AnnotatedBooks.serializer())
     suspend fun bookTitles(): List<String> = annotatedBooks().results.map { it.label }
     suspend fun publicGames(filters: PublicGameFilters = PublicGameFilters()): PublicGamePage =
@@ -122,6 +156,13 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
     suspend fun publicGame(token: String): PublicGame =
         read("/api/v1/public/games/${gameToken(token)}/", PublicGame.serializer())
     suspend fun publicPgn(token: String): String = pgn("/api/v1/public/games/${gameToken(token)}/pgn/")
+
+    /** A game another account imported and made public, by the username and slug in its page address. */
+    suspend fun publicImportedGame(username: String, gameSlug: String): PublicImportedGame =
+        read("/api/v1/public/imported-games/" + usernameSegment(username) + "/" + segment(gameSlug) + "/",
+            PublicImportedGame.serializer())
+    suspend fun publicImportedPgn(username: String, gameSlug: String): String =
+        pgn("/api/v1/public/imported-games/" + usernameSegment(username) + "/" + segment(gameSlug) + "/pgn/")
 
     /** The service caps this export at 300 games. Iterate games and batch tokens to export larger archives. */
     suspend fun exportPublicGames(filters: PublicGameFilters = PublicGameFilters(), tokens: List<String>? = null,

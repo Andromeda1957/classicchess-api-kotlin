@@ -119,8 +119,20 @@ Missing biographies are `null`, and notable lists can be empty.
 | PGN or NDJSON exports | `exportPublicGames()`, `exportMasterGames()`; select `format = "pgn"` or `format = "ndjson"` |
 | Player search and statistics | `players(query)`, `masterStats(MasterStatsFilters(...))` |
 | Opening explorer | `explorer(ExplorerFilters(...))`, `explorerSources()` |
+| Event detail and About page | `publicEvent(slug)`, `publicEventAbout(slug)` |
+| Photo gallery | `gallery(GalleryFilters(query, page, pageSize))`, `galleryPhoto(photoId)` |
+| Beginner games and Game of the Day | `beginnerGames()`, `dailyGame()` |
+| Site search | `siteSearch(query)` for a preview; `siteSearchPage(query, kind, page)` for one paginated kind: `games`, `events` or `players` |
+| Endgame tablebase | `tablebase(fen)` uses local Syzygy tables and falls back to the Lichess tablebase for larger positions, as the site does |
 | Account collections | `ApplicationClient.accountMe(token)`, `accountCollections(token)`, `accountCreateCollection(name, token)`, `accountImportPublicPlayerGames(archivePlayer, token, ...)` |
-| Notebook, Remote, Cast and other application APIs | `ApplicationClient.request(...)`, `requestBytes(...)` |
+| Add single games to collections | `ApplicationClient.accountAddCollectionGame(collectionId, gameSlug, token)` |
+| Starred players and games | `accountStarredPlayers(token, page, pageSize)`, `accountStarPlayer(slug, token)`, `accountUnstarPlayer(slug, token)`, `accountStarredGames(token, ...)`, `accountStarGame(slug, token)`, `accountUnstarGame(slug, token)` |
+| Change or delete imported games | `accountSetImportedGameVisibility(slug, "public" or "private", token)`, `accountDeleteImportedGame(slug, token)` |
+| Public imported games | `publicImportedGame(username, gameSlug)`, `publicImportedPgn(username, gameSlug)` read a game another account imported and made public, by its page address |
+| GIF exports | `ApplicationClient.masterGameGif(gameToken, token)`, `publicGameGif(slug, token)`, `annotatedGameGif(bookSlug, gameSlug, token)`, `publicImportedGameGif(username, slug, token)`, `accountImportedGameGif(slug, token)`; pass `orientation = "black"` to flip the board |
+| Notifications | `accountNotifications(token, page, pageSize)`, `accountMarkNotificationRead(id, token)`, `accountMarkAllNotificationsRead(token)`, `accountDismissNotification(id, token)`, `accountNotificationPreferences(token)`, `accountUpdateNotificationPreferences(token, topics, soundEnabled)` |
+| Notebook exports | `accountNotebooks(token)`, `accountNotebook(uuid, token)`, `accountNotebookChapterPgn(uuid, chapterId, token)`, `accountNotebookFile(uuid, token, password)` |
+| Notebook, Remote, Cast and other application APIs | `ApplicationClient.request(...)`, `requestBytes(...)`, `download(...)` for files |
 | Scanner upload | `ApplicationClient.scanPosition(jpegBytes, token)` |
 
 Public game filters include `query`, `archivePlayer`, `archiveEvent`, `since`,
@@ -160,6 +172,12 @@ including HTTP errors such as conflicts. `request` accepts JSON text;
 session credentials have different permissions; use the credential required
 by the endpoint. Credentials are never stored by the client or sent on public reads.
 
+GIF, chapter PGN and Notebook file methods return an `ApplicationDownload` with
+`ok`, `status`, `bytes` (the file when `ok`), `contentType`, `filename`,
+`retryAfter` and `error` (the JSON error reply otherwise). GIF exports need a
+registered account, so any personal token or device session works, and they
+share the site limit on GIF exports: honor `retryAfter` after a 429.
+
 ## Errors and cancellation
 
 Public-client HTTP failures and transport failures throw `ApiException` with
@@ -170,8 +188,10 @@ pages, changed origins or collections, and more than 100,000 pages.
 
 The application transport follows no redirects and sends no cookies. Bearer
 requests require a private API path over HTTPS or loopback development.
-Neither client retries mutations automatically. Honor `Retry-After` when handling
-rate limits. Response models accept new fields; statistics and explorer helpers
+Neither client retries mutations automatically. A GET whose pooled keep-alive
+connection was already closed by the server is replayed once on a fresh
+connection; POST, PUT, PATCH and DELETE never are. Honor `Retry-After` when
+handling rate limits. Response models accept new fields; statistics and explorer helpers
 return JSON objects to preserve the API's complete data.
 
 ## Build and test this repository
