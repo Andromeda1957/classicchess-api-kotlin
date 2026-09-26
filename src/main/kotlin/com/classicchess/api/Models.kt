@@ -738,6 +738,112 @@ data class AccountNotebookDetail(
 )
 
 @Serializable
+data class GymBot(
+    val `key`: String,
+    val `name`: String,
+    val `about`: String,
+)
+
+@Serializable
+data class GymTimeControls(
+    val `presets`: List<String>,
+    @SerialName("max_minutes") val `maxMinutes`: Long,
+    @SerialName("max_increment_seconds") val `maxIncrementSeconds`: Long,
+)
+
+@Serializable
+data class GymNewGame(
+    val `color`: String? = null,
+    val `time`: String? = null,
+    val `minutes`: Long? = null,
+    val `increment`: Long? = null,
+)
+
+@Serializable
+data class GymClock(
+    @SerialName("initial_ms") val `initialMs`: Long,
+    @SerialName("increment_ms") val `incrementMs`: Long,
+    @SerialName("white_ms") val `whiteMs`: Long,
+    @SerialName("black_ms") val `blackMs`: Long,
+    val `running`: String?,
+)
+
+@Serializable
+data class GymGameSummary(
+    val `id`: Long,
+    val `bot`: String,
+    @SerialName("bot_name") val `botName`: String,
+    val `player`: String,
+    @SerialName("is_player") val `isPlayer`: Boolean,
+    @SerialName("human_color") val `humanColor`: String,
+    val `plies`: Long,
+    val `result`: String,
+    val `finished`: Boolean,
+    val `termination`: String,
+    @SerialName("termination_label") val `terminationLabel`: String,
+    val `opening`: String,
+    @SerialName("time_control") val `timeControl`: String,
+    @SerialName("created_at") val `createdAt`: String,
+    val `urls`: ResourceLinks,
+)
+
+@Serializable
+data class GymGamePage(
+    val `count`: Long,
+    val `page`: Long,
+    @SerialName("page_size") val `pageSize`: Long,
+    @SerialName("page_count") val `pageCount`: Long,
+    val `results`: List<GymGameSummary>,
+)
+
+@Serializable
+data class GymHome(
+    val `bots`: List<GymBot>,
+    @SerialName("time_controls") val `timeControls`: GymTimeControls,
+    @SerialName("can_review_all") val `canReviewAll`: Boolean,
+    val `games`: GymGamePage,
+)
+
+@Serializable
+data class GymGameState(
+    val `id`: Long,
+    val `bot`: String,
+    @SerialName("bot_name") val `botName`: String,
+    val `player`: String,
+    @SerialName("is_player") val `isPlayer`: Boolean,
+    val `moves`: List<String>,
+    val `sans`: List<String>,
+    val `fen`: String,
+    val `ply`: Long,
+    @SerialName("human_color") val `humanColor`: String,
+    val `result`: String,
+    val `finished`: Boolean,
+    val `termination`: String,
+    @SerialName("termination_label") val `terminationLabel`: String,
+    val `takebacks`: Long,
+    @SerialName("can_abort") val `canAbort`: Boolean,
+    val `clock`: GymClock?,
+    @SerialName("bot_to_move") val `botToMove`: Boolean,
+    val `opening`: String,
+    @SerialName("time_control") val `timeControl`: String,
+    @SerialName("created_at") val `createdAt`: String,
+    val `urls`: ResourceLinks,
+)
+
+@Serializable
+data class GymDeleted(
+    val `ok`: Boolean,
+    val `id`: Long,
+)
+
+@Serializable
+data class GymAborted(
+    val `ok`: Boolean,
+    val `id`: Long,
+    val `aborted`: Boolean,
+)
+
+@Serializable
 data class ChessTodayEntrySourcesItem(
     val `id`: String,
     val `url`: String,

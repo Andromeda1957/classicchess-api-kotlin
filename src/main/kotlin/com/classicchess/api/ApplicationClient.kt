@@ -130,6 +130,67 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
         return download(path, token, "POST", buildJsonObject { put("password", password) }.toString(), accept)
     }
 
+    // The Gym: play the site's bots. Personal tokens need gym:read to read and
+    // gym:play for the rest; device sessions pass both. Decode replies with the
+    // generated models, for example GymGameState.serializer().
+    /** The bots, the time controls a new game may use and the newest page of your games. */
+    suspend fun accountGym(token: String, pageSize: Int = 20): ApplicationResponse {
+        libraryPage(1, pageSize)
+        return request("/api/v1/account/gym/?page_size=$pageSize", token = token)
+    }
+    /** Your games, newest first; player "others" is for the Gym's review accounts only. */
+    suspend fun accountGymGames(token: String, page: Int = 1, pageSize: Int = 20, player: String = "me"): ApplicationResponse {
+        if (player !in listOf("me", "others")) throw ApiException("player must be me or others.", "invalid_request")
+        val query = libraryPage(page, pageSize) + if (player == "others") "&player=others" else ""
+        return request("/api/v1/account/gym/games/?$query", token = token)
+    }
+    /** Start a game (201). [time] is "unlimited", a preset such as "3+0", or "custom" with [minutes] and [increment]. */
+    suspend fun accountGymNewGame(botKey: String, token: String, color: String = "white", time: String = "unlimited",
+        minutes: Int? = null, increment: Int? = null): ApplicationResponse {
+        if (color !in listOf("white", "black", "random")) throw ApiException("color must be white, black or random.", "invalid_request")
+        if (time.isEmpty()) throw ApiException("time must be unlimited, a preset such as 3+0, or custom.", "invalid_request")
+        if (time == "custom") {
+            if (minutes == null || minutes < 1 || increment == null || increment < 0) {
+                throw ApiException("A custom time needs whole minutes from 1 and increment seconds from 0.", "invalid_request")
+            }
+        } else if (minutes != null || increment != null) {
+            throw ApiException("minutes and increment apply only to time \"custom\".", "invalid_request")
+        }
+        val body = buildJsonObject {
+            put("color", color); put("time", time)
+            minutes?.let { put("minutes", it) }; increment?.let { put("increment", it) }
+        }
+        return request("/api/v1/account/gym/bots/" + segment(botKey) + "/games/", "POST", body.toString(), token)
+    }
+    suspend fun accountGymGame(gameId: Long, token: String): ApplicationResponse = request(gymGame(gameId), token = token)
+    suspend fun accountGymGamePgn(gameId: Long, token: String): ApplicationDownload =
+        download(gymGame(gameId) + "pgn/", token, accept = "application/x-chess-pgn")
+    /** Play a UCI move such as "e2e4" at the ply you have seen; a stale ply is 409 and plays nothing. */
+    suspend fun accountGymMove(gameId: Long, move: String, ply: Int, token: String): ApplicationResponse {
+        if (!UCI_MOVE.matches(move)) throw ApiException("Use a UCI move such as e2e4 or e7e8q.", "invalid_request")
+        return request(gymGame(gameId) + "move/", "POST",
+            buildJsonObject { put("move", move); put("ply", ply(ply)) }.toString(), token)
+    }
+    /**
+     * Ask for the bot's move. A 429 capacity_exhausted means the engine is busy: wait retryAfter
+     * seconds and ask again with the same ply. A 429 engine_budget means this account's hour of
+     * engine time is spent until retryAfter seconds from now.
+     */
+    suspend fun accountGymBotMove(gameId: Long, ply: Int, token: String): ApplicationResponse =
+        request(gymGame(gameId) + "bot-move/", "POST", buildJsonObject { put("ply", ply(ply)) }.toString(), token)
+    suspend fun accountGymResign(gameId: Long, token: String): ApplicationResponse =
+        request(gymGame(gameId) + "resign/", "POST", token = token)
+    suspend fun accountGymTakeBack(gameId: Long, token: String): ApplicationResponse =
+        request(gymGame(gameId) + "takeback/", "POST", token = token)
+    /** Settle the clock when one you show reaches zero; the server decides. */
+    suspend fun accountGymClock(gameId: Long, token: String): ApplicationResponse =
+        request(gymGame(gameId) + "clock/", "POST", token = token)
+    /** Abort (and delete) a game before your first move. */
+    suspend fun accountGymAbort(gameId: Long, token: String): ApplicationResponse =
+        request(gymGame(gameId) + "abort/", "POST", token = token)
+    suspend fun accountGymDeleteGame(gameId: Long, token: String): ApplicationResponse =
+        request(gymGame(gameId), "DELETE", token = token)
+
     /** Binary notebook requests preserve their original bytes and media type. */
     suspend fun requestBytes(path: String, body: ByteArray, token: String? = null, method: String = "POST",
         contentType: String = "application/octet-stream", timeoutMillis: Long? = null): ApplicationResponse {
@@ -239,6 +300,15 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
 
         private fun positiveId(value: Long, label: String): Long {
             if (value < 1) throw ApiException("Use a positive " + label + ".", "invalid_request")
+            return value
+        }
+
+        private val UCI_MOVE = Regex("[a-h][1-8][a-h][1-8][qrbn]?")
+
+        private fun gymGame(gameId: Long): String = "/api/v1/account/gym/games/" + positiveId(gameId, "game ID") + "/"
+
+        private fun ply(value: Int): Int {
+            if (value < 0) throw ApiException("Use the ply from the game state: a whole number from 0.", "invalid_request")
             return value
         }
 

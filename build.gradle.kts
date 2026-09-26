@@ -1,6 +1,6 @@
 plugins {
-    kotlin("jvm") version "2.1.20"
-    kotlin("plugin.serialization") version "2.1.20"
+    kotlin("jvm") version "2.4.20"
+    kotlin("plugin.serialization") version "2.4.20"
     `java-library`
     `maven-publish`
     signing
@@ -11,18 +11,28 @@ group = "com.classicchess"
 version = "0.1.0"
 repositories { mavenCentral() }
 
-kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8) } }
+// Built with the current Kotlin compiler but published for Kotlin 2.1: the
+// client's stdlib and metadata stay readable by older consumers, including
+// the Android app's AGP-bundled compiler (android/andromeda-native).
+kotlin {
+    coreLibrariesVersion = "2.1.20"
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)
+        apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_1)
+        languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_1)
+    }
+}
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
     targetCompatibility = JavaVersion.VERSION_1_8
     withSourcesJar()
 }
 dependencies {
-    implementation("com.squareup.okhttp3:okhttp:5.3.2")
+    implementation("com.squareup.okhttp3:okhttp:5.5.0")
     api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
     api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     testImplementation(kotlin("test-junit"))
-    testImplementation("com.squareup.okhttp3:mockwebserver:5.3.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.5.0")
 }
 dependencyLocking { lockAllConfigurations() }
 

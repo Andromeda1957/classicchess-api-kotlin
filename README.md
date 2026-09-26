@@ -59,8 +59,8 @@ dependencies { implementation("com.classicchess:api-client:0.1.0") }
 
 Gradle now builds the dependency from `vendor/classicchess-api-kotlin`. This is
 a Gradle composite build: the module name resolves to that source checkout.
-The SDK targets JVM 8 bytecode and uses Kotlin 2.1.20, OkHttp,
-kotlinx.serialization and kotlinx.coroutines. Its Android example targets
+The SDK targets JVM 8 bytecode. It is built with Kotlin 2.4.20 for Kotlin 2.1
+consumers and uses OkHttp, kotlinx.serialization and kotlinx.coroutines. Its Android example targets
 minSdk 23 with JDK 17 and Android Gradle Plugin 8.9.1.
 
 ## Read an archive
@@ -132,6 +132,7 @@ Missing biographies are `null`, and notable lists can be empty.
 | GIF exports | `ApplicationClient.masterGameGif(gameToken, token)`, `publicGameGif(slug, token)`, `annotatedGameGif(bookSlug, gameSlug, token)`, `publicImportedGameGif(username, slug, token)`, `accountImportedGameGif(slug, token)`; pass `orientation = "black"` to flip the board |
 | Notifications | `accountNotifications(token, page, pageSize)`, `accountMarkNotificationRead(id, token)`, `accountMarkAllNotificationsRead(token)`, `accountDismissNotification(id, token)`, `accountNotificationPreferences(token)`, `accountUpdateNotificationPreferences(token, topics, soundEnabled)` |
 | Notebook exports | `accountNotebooks(token)`, `accountNotebook(uuid, token)`, `accountNotebookChapterPgn(uuid, chapterId, token)`, `accountNotebookFile(uuid, token, password)` |
+| Play the Gym's bots | `accountGym(token)`, `accountGymGames(token, page, pageSize)`, `accountGymNewGame(botKey, token, color, time, minutes, increment)`, `accountGymGame(id, token)`, `accountGymMove(id, uci, ply, token)`, `accountGymBotMove(id, ply, token)`, `accountGymTakeBack(id, token)`, `accountGymResign(id, token)`, `accountGymClock(id, token)`, `accountGymAbort(id, token)`, `accountGymDeleteGame(id, token)`, `accountGymGamePgn(id, token)` |
 | Notebook, Remote, Cast and other application APIs | `ApplicationClient.request(...)`, `requestBytes(...)`, `download(...)` for files |
 | Scanner upload | `ApplicationClient.scanPosition(jpegBytes, token)` |
 
@@ -177,6 +178,49 @@ GIF, chapter PGN and Notebook file methods return an `ApplicationDownload` with
 `retryAfter` and `error` (the JSON error reply otherwise). GIF exports need a
 registered account, so any personal token or device session works, and they
 share the site limit on GIF exports: honor `retryAfter` after a 429.
+
+### Play the Gym's bots
+
+Any account can play the Gym's bots; the moves are computed on the server.
+Personal tokens need `gym:read` to read games and `gym:play` to start and play
+them. Send the `ply` from the latest game state with each move: a stale ply
+returns 409 and plays nothing, so a repeated request is safe. The bot engine
+plays one move at a time. While it is busy, `accountGymBotMove` returns 429
+with `capacity_exhausted`: wait `retryAfter` seconds and ask again with the
+same ply. Each account has an hour of engine time; once it is spent the answer
+is 429 `engine_budget` with `retryAfter` set to the seconds until the hour
+ends. An account starts at most 30 games an hour. Decode replies with the
+generated models, such as `GymGameState`:
+
+```kotlin
+import com.classicchess.api.ApplicationClient
+import com.classicchess.api.GymGameState
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
+private val json = Json { ignoreUnknownKeys = true }
+
+fun main() = runBlocking {
+    val token = requireNotNull(System.getenv("CLASSICCHESS_API_TOKEN")) { "Set a token with gym:read and gym:play" }
+    ApplicationClient().use { api ->
+        val created = api.accountGymNewGame("morphy", token, color = "white", time = "5+0")
+        check(created.ok) { "${created.status}: ${created.data}" }
+        var game = json.decodeFromJsonElement(GymGameState.serializer(), created.data)
+        game = json.decodeFromJsonElement(GymGameState.serializer(),
+            api.accountGymMove(game.id, "e2e4", game.ply.toInt(), token).data)
+        var reply = api.accountGymBotMove(game.id, game.ply.toInt(), token)
+        while (reply.status == 429 &&
+            reply.data["error"]?.jsonObject?.get("code")?.jsonPrimitive?.content == "capacity_exhausted") {
+            delay((reply.retryAfter?.toLongOrNull() ?: 1) * 1000)
+            reply = api.accountGymBotMove(game.id, game.ply.toInt(), token)
+        }
+        println("${reply.status}: ${reply.data["sans"]}")
+    }
+}
+```
 
 ## Errors and cancellation
 
