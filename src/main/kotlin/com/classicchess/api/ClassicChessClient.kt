@@ -18,6 +18,10 @@ data class MasterGameFilters(val query: String, val page: Int? = null, val pageS
 data class MasterStatsFilters(val query: String? = null, val player: String? = null, val opponent: String? = null, val mode: String? = null)
 data class ExplorerFilters(val fen: String? = null, val play: String? = null, val moves: Int = 12,
     val topGames: Int? = null, val sourceType: String? = null, val sourceKey: String? = null)
+/** Lichess Explorer: no player covers the whole Lichess database; a Lichess username covers that player's games. */
+data class LichessExplorerFilters(val fen: String? = null, val player: String? = null,
+    val color: String = "both", val result: String = "all")
+private val lichessUsername = Regex("^[A-Za-z0-9_-]{2,30}$")
 data class PublicGameFilters(
     val query: String? = null, val archivePlayer: String? = null, val archiveEvent: String? = null,
     val since: Int? = null, val until: Int? = null, val sort: String? = null,
@@ -84,6 +88,20 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
         read("/api/v1/opening-explorer/", JsonObject.serializer(), mapOf("fen" to filters.fen, "play" to filters.play,
             "moves" to filters.moves, "topGames" to filters.topGames, "source_type" to filters.sourceType, "source_key" to filters.sourceKey))
     suspend fun explorerSources(): JsonObject = read("/api/v1/opening-explorer/sources/", JsonObject.serializer())
+    /** Explore a position in the Lichess database; Classic Chess relays it with its own Lichess credential. */
+    suspend fun lichessExplorer(filters: LichessExplorerFilters = LichessExplorerFilters()): JsonObject {
+        val player = filters.player.orEmpty().trim()
+        if ((filters.fen?.length ?: 0) > 100) throw ApiException("Use a FEN of at most 100 characters.", "invalid_query")
+        if (player.isNotEmpty() && !lichessUsername.matches(player)) throw ApiException("Use a valid Lichess username.", "invalid_query")
+        if (filters.color !in listOf("both", "white", "black") || filters.result !in listOf("all", "win", "loss", "draw")) {
+            throw ApiException("color must be both, white or black; result must be all, win, loss or draw.", "invalid_query")
+        }
+        if (player.isEmpty() && filters.result != "all") throw ApiException("A Lichess username is needed for result filters.", "invalid_query")
+        val fen = filters.fen?.takeIf { it.isNotEmpty() }
+        val query = if (player.isEmpty()) mapOf("fen" to fen)
+            else mapOf("fen" to fen, "player" to player, "color" to filters.color, "result" to filters.result)
+        return read("/api/v1/opening-explorer/lichess/", JsonObject.serializer(), query)
+    }
     suspend fun exportMasterGames(query: String? = null, tokens: List<String>? = null,
         format: String = "pgn", pgnInJson: Boolean = true): String {
         if (tokens.isNullOrEmpty() && query.isNullOrEmpty() || tokens != null && tokens.size !in 1..300) {

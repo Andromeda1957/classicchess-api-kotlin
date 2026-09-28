@@ -119,6 +119,7 @@ Missing biographies are `null`, and notable lists can be empty.
 | PGN or NDJSON exports | `exportPublicGames()`, `exportMasterGames()`; select `format = "pgn"` or `format = "ndjson"` |
 | Player search and statistics | `players(query)`, `masterStats(MasterStatsFilters(...))` |
 | Opening explorer | `explorer(ExplorerFilters(...))`, `explorerSources()` |
+| Lichess opening explorer | `lichessExplorer(LichessExplorerFilters(fen, player, color, result))` relays through Classic Chess, so no Lichess token is needed; no player covers the whole Lichess database, a Lichess username covers that player's games |
 | Event detail and About page | `publicEvent(slug)`, `publicEventAbout(slug)` |
 | Photo gallery | `gallery(GalleryFilters(query, page, pageSize))`, `galleryPhoto(photoId)` |
 | Beginner games and Game of the Day | `beginnerGames()`, `dailyGame()` |
@@ -187,9 +188,9 @@ them. Send the `ply` from the latest game state with each move: a stale ply
 returns 409 and plays nothing, so a repeated request is safe. The bot engine
 plays one move at a time. While it is busy, `accountGymBotMove` returns 429
 with `capacity_exhausted`: wait `retryAfter` seconds and ask again with the
-same ply. Each account has an hour of engine time; once it is spent the answer
-is 429 `engine_budget` with `retryAfter` set to the seconds until the hour
-ends. An account starts at most 30 games an hour. Decode replies with the
+same ply. Each account may use 30 minutes of engine time in each hour; once it
+is spent the answer is 429 `engine_budget` with `retryAfter` set to the seconds
+until that hour ends. An account starts at most 30 games an hour. Decode replies with the
 generated models, such as `GymGameState`:
 
 ```kotlin

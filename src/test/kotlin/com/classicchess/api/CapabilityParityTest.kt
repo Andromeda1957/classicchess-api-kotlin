@@ -65,6 +65,32 @@ class CapabilityParityTest {
         }
     }
 
+    @Test fun lichessExplorerRelaysThroughTheSiteAndRejectsBadFilters() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            ClassicChessClient(ClientOptions(baseUrl = server.url("/").toString())).use { api ->
+                repeat(2) { server.enqueue(MockResponse().setBody("{\"ok\":true,\"count\":3}")) }
+                assertEquals("3", api.lichessExplorer()["count"].toString())
+                api.lichessExplorer(LichessExplorerFilters(fen = "8/8/8/8/8/2k5/2P5/2K5 w - - 0 1",
+                    player = "DrNykterstein", color = "white", result = "win"))
+                val rejected = listOf<suspend () -> Unit>(
+                    { api.lichessExplorer(LichessExplorerFilters(player = "a")) },
+                    { api.lichessExplorer(LichessExplorerFilters(player = "x/../me")) },
+                    { api.lichessExplorer(LichessExplorerFilters(result = "win")) },
+                    { api.lichessExplorer(LichessExplorerFilters(player = "abc", color = "red")) },
+                    { api.lichessExplorer(LichessExplorerFilters(fen = "k".repeat(101))) },
+                )
+                for (call in rejected) assertFailsWith<ApiException> { call() }
+                assertEquals(2, server.requestCount)
+                val requests = (1..2).map { server.takeRequest() }
+                assertEquals(listOf("/api/v1/opening-explorer/lichess/",
+                    "/api/v1/opening-explorer/lichess/?fen=8%2F8%2F8%2F8%2F8%2F2k5%2F2P5%2F2K5%20w%20-%20-%200%201" +
+                        "&player=DrNykterstein&color=white&result=win"), requests.map { it.path })
+                requests.forEach { assertNull(it.getHeader("Authorization")) }
+            }
+        }
+    }
+
     @Test fun accountHelpersPreserveCredentialsAndBodies() = runBlocking {
         MockWebServer().use { server ->
             server.start()
