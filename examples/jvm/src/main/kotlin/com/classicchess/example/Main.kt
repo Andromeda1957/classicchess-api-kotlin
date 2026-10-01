@@ -4,10 +4,9 @@ import com.classicchess.api.ClassicChessClient
 import com.classicchess.api.ClientOptions
 import kotlinx.coroutines.runBlocking
 
-/** Run with players (default), events, books or profile, followed by an optional origin. */
+/** Run with players (default), events, books or profile. */
 fun main(args: Array<String>) = runBlocking {
     ClassicChessClient(ClientOptions(
-        baseUrl = args.getOrNull(1) ?: "https://classicchess.com",
         userAgent = "ClassicChess-KotlinExample/0.1.0",
     )).use { api ->
         when (args.firstOrNull() ?: "players") {

@@ -23,7 +23,13 @@ internal object SiteGapFixtures {
   "imported_at": "2026-01-02T00:00:00+00:00",
   "pgn": "1. e4 1-0",
   "mainline": {
-    "moves": []
+    "initial_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "final_fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+    "moves": [
+      {"ply": 1, "san": "e4", "uci": "e2e4", "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"}
+    ],
+    "truncated": false,
+    "parse_error": false
   },
   "urls": {
     "api_detail": "/api/v1/public/imported-games/ann.lee+1/g1/",

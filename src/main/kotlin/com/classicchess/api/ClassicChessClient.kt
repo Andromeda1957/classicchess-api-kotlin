@@ -26,6 +26,8 @@ data class PublicGameFilters(
     val query: String? = null, val archivePlayer: String? = null, val archiveEvent: String? = null,
     val since: Int? = null, val until: Int? = null, val sort: String? = null,
     val page: Int? = null, val pageSize: Int? = null,
+    /** Which fields [query] searches: "players" (players, event, site, date), "openings" (opening name, ECO) or "all" (default). */
+    val searchMode: String? = null,
 )
 data class GalleryFilters(val query: String? = null, val page: Int? = null, val pageSize: Int? = null)
 data class IterationOptions(val limit: Long? = null, val maxPages: Int = 100_000)
@@ -39,8 +41,12 @@ private fun pageQuery(options: PageOptions): Map<String, Any?> {
 private fun gameQuery(filters: PublicGameFilters): Map<String, Any?> {
     if (filters.sort != null && filters.sort !in listOf("asc", "desc", "event")) throw ApiException("sort must be asc, desc or event.", "invalid_query")
     if (filters.sort == "event" && filters.archiveEvent.isNullOrBlank()) throw ApiException("sort=event requires archiveEvent.", "invalid_query")
+    if (filters.searchMode != null && filters.searchMode !in listOf("all", "players", "openings")) {
+        throw ApiException("searchMode must be all, players or openings.", "invalid_query")
+    }
     return pageQuery(PageOptions(filters.page, filters.pageSize)) + mapOf(
         "q" to filters.query, "archive_player" to filters.archivePlayer, "archive_event" to filters.archiveEvent,
+        "search_mode" to filters.searchMode,
         "since" to filters.since, "until" to filters.until, "sort" to filters.sort,
     )
 }

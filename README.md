@@ -137,8 +137,10 @@ Missing biographies are `null`, and notable lists can be empty.
 | Notebook, Remote, Cast and other application APIs | `ApplicationClient.request(...)`, `requestBytes(...)`, `download(...)` for files |
 | Scanner upload | `ApplicationClient.scanPosition(jpegBytes, token)` |
 
-Public game filters include `query`, `archivePlayer`, `archiveEvent`, `since`,
-`until`, `sort`, `page` and `pageSize`. Each export is capped at 300 games; iterate
+Public game filters include `query`, `archivePlayer`, `archiveEvent`, `searchMode`,
+`since`, `until`, `sort`, `page` and `pageSize`. `searchMode` chooses which fields
+`query` searches: `players` (players, event, site and date), `openings` (opening
+name and ECO) or `all` (the default). Each export is capped at 300 games; iterate
 larger archives and export batches of up to 300 returned tokens. PGN is the
 standard text format for chess games. NDJSON contains one JSON object per line;
 `pgnInJson = false` omits PGN text from NDJSON records.
@@ -236,20 +238,30 @@ requests require a private API path over HTTPS or loopback development.
 Neither client retries mutations automatically. A GET whose pooled keep-alive
 connection was already closed by the server is replayed once on a fresh
 connection; POST, PUT, PATCH and DELETE never are. Honor `Retry-After` when
-handling rate limits. Response models accept new fields; statistics and explorer helpers
-return JSON objects to preserve the API's complete data.
+handling rate limits. Response models accept new fields, and an enum value added by
+the server decodes as that enum's `UNKNOWN_DEFAULT_OPEN_API` entry. Statistics and
+explorer helpers, the event crosstable and search result lists return JSON to
+preserve the API's complete data.
 
 ## Build and test this repository
 
-From the SDK checkout above, install Python 3 with PyYAML for the generated-model
-check, then run the tests:
+From the SDK checkout above, with JDK 17 or newer, run the model contract check
+and the tests:
 
 ```sh
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install PyYAML==6.0.3
 ./gradlew check
 ```
+
+The response models in `src/generated/kotlin` are generated from
+`contracts/openapi.yaml` by the [OpenAPI Generator](https://openapi-generator.tech/)
+Gradle plugin and committed. After a contract change, regenerate them and test:
+
+```sh
+./gradlew generateModels test
+```
+
+`./gradlew check` runs `checkContract`, which fails if the committed models drift
+from the contract.
 
 `./gradlew packageClient` is an optional contributor command that creates a local
 Maven repository ZIP in `artifacts/`; normal source installation does not need it.

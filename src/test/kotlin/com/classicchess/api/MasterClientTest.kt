@@ -36,11 +36,17 @@ class MasterClientTest {
     }
 
     @Test fun detailAndPgnKeepScoreAndOpaqueIdentifier() = runBlocking {
-        reply(game().dropLast(1) + """, "pgn":"1. e4 e5 *","mainline":{"moves":[{"san":"e4"}]}}""")
+        val start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        val afterE4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
+        reply(
+            game().dropLast(1) + """, "pgn":"1. e4 *","mainline":{"initial_fen":"$start","final_fen":"$afterE4",""" +
+                """"moves":[{"ply":1,"san":"e4","uci":"e2e4","fen":"$afterE4"}],"truncated":false,"parse_error":false}}""",
+        )
         val detail = api.masterGame(TOKEN)
         assertEquals(TOKEN, detail.token)
-        assertEquals("1. e4 e5 *", detail.pgn)
-        assertNotNull(detail.mainline["moves"])
+        assertEquals("1. e4 *", detail.pgn)
+        assertEquals("e2e4", detail.mainline.moves.single().uci)
+        assertEquals(afterE4, detail.mainline.finalFen)
         assertEquals("/api/v1/games/$TOKEN/", server.takeRequest().path)
         reply(ClientTest.pgn)
         assertEquals(ClientTest.pgn, api.masterPgn(TOKEN))

@@ -27,7 +27,7 @@ class ClientTest {
         assertEquals(listOf("Tal", "José Capablanca", "Petrosian"), api.playerNames())
         assertEquals("/api/v1/public/players/", path())
         path()
-        val events = """{"source":"public","query":"","count":3,"results":[${(1..3).joinToString { """{"slug":"event-$it","name":"Event $it","year":1900,"game_count":3,"expected_game_count":3,"event_type":{},"series":null,"source":{},"urls":{}}""" }}]}"""
+        val events = """{"source":"public","query":"","count":3,"results":[${(1..3).joinToString { """{"slug":"event-$it","name":"Event $it","year":1900,"game_count":3,"expected_game_count":3,"event_type":{"key":"tournament","label":"Tournament"},"series":null,"source":{"event":"Event $it","site":"","year":1900},"urls":{}}""" }}]}"""
         repeat(2) { reply(events) }
         assertEquals(3, api.publicEvents().results.size)
         assertEquals(listOf("Event 1", "Event 2", "Event 3"), api.eventNames())
@@ -63,9 +63,9 @@ class ClientTest {
         api.publicPlayers("Tal & Keres?")
         assertEquals("Tal & Keres?", server.takeRequest()!!.requestUrl!!.queryParameter("q"))
         reply(page("/api/v1/public/games/", 1, null))
-        api.publicGames(PublicGameFilters(query = "B33 & wins", archivePlayer = "Mikhail_Tal", archiveEvent = "event", since = 1950, until = 1960, sort = "desc", page = 2, pageSize = 3))
+        api.publicGames(PublicGameFilters(query = "B33 & wins", archivePlayer = "Mikhail_Tal", archiveEvent = "event", since = 1950, until = 1960, sort = "desc", page = 2, pageSize = 3, searchMode = "openings"))
         val url = server.takeRequest()!!.requestUrl!!
-        assertEquals(mapOf("q" to "B33 & wins", "archive_player" to "Mikhail_Tal", "archive_event" to "event", "since" to "1950", "until" to "1960", "sort" to "desc", "page" to "2", "page_size" to "3"), url.queryParameterNames.associateWith { url.queryParameter(it) })
+        assertEquals(mapOf("q" to "B33 & wins", "archive_player" to "Mikhail_Tal", "archive_event" to "event", "search_mode" to "openings", "since" to "1950", "until" to "1960", "sort" to "desc", "page" to "2", "page_size" to "3"), url.queryParameterNames.associateWith { url.queryParameter(it) })
         for (token in listOf("game", "Mikhail_Tal/game")) {
             reply(game(token)); assertEquals(token, api.publicGame(token).token)
             assertEquals("/api/v1/public/games/$token/", path())
@@ -136,6 +136,7 @@ class ClientTest {
         assertFailsWith<ApiException> { api.publicGames(PublicGameFilters(page = 0)) }
         assertFailsWith<ApiException> { api.publicGames(PublicGameFilters(pageSize = 101)) }
         assertFailsWith<ApiException> { api.publicGames(PublicGameFilters(sort = "sideways")) }
+        assertFailsWith<ApiException> { api.publicGames(PublicGameFilters(searchMode = "events")) }
         assertFailsWith<ApiException> { api.exportPublicGames(tokens = emptyList()) }
         assertFailsWith<ApiException> { api.exportPublicGames(tokens = List(301) { "game" }) }
         assertEquals(0, server.requestCount)
@@ -186,7 +187,7 @@ class ClientTest {
     }
 
     @Test fun discoveryUsesPublicOriginAndDescriptiveUserAgent() = runBlocking {
-        reply("""{"name":"Classic Chess","version":"v1","authentication":{},"documentation":{},"collections":{},"player_resources":{},"tools":{},"pagination":{}}""")
+        reply("""{"name":"Classic Chess","version":"v1","authentication":{"public_reads":"None","account_api":"Bearer"},"documentation":{},"clients":{"comparison":"","maintained":[]},"collections":{},"player_resources":{"description":"","detail":"/api/v1/public/players/{player_slug}/","bio":"","notable_games":""},"event_resources":{"description":"","detail":"/api/v1/public/events/{event_slug}/","about":""},"tools":{},"pagination":{"catalogs":"","games":"","default_page_size":50,"max_page_size":100}}""")
         assertEquals("v1", api.discovery().version)
         val request = server.takeRequest()
         assertEquals("/api/v1/", request.path)
@@ -200,11 +201,12 @@ class ClientTest {
         fun player(slug: String, name: String) = """{"slug":"$slug","name":"$name","archive_bucket":{},"game_count":3,"archive_years":"1950–1960","bookmarked":false,"criteria":"","portrait":{},"bio":null,"urls":{}}"""
         fun players() = """{"source":"public","query":"","active_bucket":"","archive_buckets":[],"count":3,"results":[${player("tal", "Tal")},${player("capa", "José Capablanca")},${player("petro", "Petrosian")}]}"""
         fun game(token: String) = """{"token":"$token","player":null,"white":"White","black":"Black","result":"1-0","event":"Test","date":"1960.??.??","urls":{"api_pgn":"/api/v1/public/games/$token/pgn/"}}"""
-        fun books() = """{"source":"annotated","count":3,"results":[${(1..3).joinToString { """{"slug":"book-$it","label":"Book $it","source_url":"","game_count":3,"cover_image":"","urls":{},"download":null}""" }}]}"""
+        fun books() = """{"source":"annotated","count":3,"results":[${(1..3).joinToString { """{"slug":"book-$it","workbench_uuid":null,"label":"Book $it","source_url":"","game_count":3,"cover_image":"","urls":{},"download":null}""" }}]}"""
         fun annotatedGame(token: String) = game(token).dropLast(1) + """, "book":{"slug":"book","label":"Book","source_url":""},"annotation":{"source_label":"Source","source_url":"","license":"public-domain","license_name":"Public domain","is_public_domain":true,"note_count":0}}"""
         fun page(path: String, number: Int, next: String?): String {
             val annotated = path.contains("annotated")
-            return """{"source":"${if (annotated) "annotated" else "public"}","book":{},"count":3,"page":$number,"page_size":1,"page_count":3,"previous":null,"next":${next?.let { "\"$it\"" } ?: "null"},"results":[${if (annotated) annotatedGame("book/game-$number") else game("game-$number")}]}"""
+            val book = if (annotated) """"book":{"slug":"book","workbench_uuid":null,"label":"Book","source_url":"","game_count":3,"cover_image":"","urls":{},"download":null},""" else ""
+            return """{"source":"${if (annotated) "annotated" else "public"}",$book"count":3,"page":$number,"page_size":1,"page_count":3,"previous":null,"next":${next?.let { "\"$it\"" } ?: "null"},"results":[${if (annotated) annotatedGame("book/game-$number") else game("game-$number")}]}"""
         }
         fun notables() = """{"source":"public","player":{"name":"Tal","slug":"Tal"},"count":2,"results":[{"position":1,"title":"Second game","annotation":"Context","game":${game("two")}},{"position":2,"title":"First game","annotation":"More context","game":${game("one")}}]}"""
     }

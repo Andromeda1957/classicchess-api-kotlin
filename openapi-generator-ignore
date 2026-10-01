@@ -1,0 +1,9 @@
+# Request bodies and responses declared inline on operations; the client's
+# operations are hand-written and take arguments rather than these wrappers.
+# The generator names them after the operationId (<operationId>Request,
+# <operationId>200Response). No component schema may end in "Request".
+**/*Request.kt
+**/*200Response.kt
+# Served as JSON (see schemaMappings in build.gradle.kts).
+**/LichessOpeningExplorer*.kt
+**/PublicEventAboutCrosstableAnyOf*.kt

@@ -4,6 +4,7 @@ import kotlin.test.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -40,8 +41,8 @@ class SiteApiTest {
                 assertEquals(event.event.slug, about.event.slug)
                 assertNotNull(about.bio)
                 assertEquals("Format", about.autoVitals.first().label)
-                assertEquals("matchup", api.siteSearch("fischer spassky").intent)
-                assertEquals("games", api.siteSearchPage("fischer spassky", "games", 2).kind)
+                assertEquals(SiteSearchPreview.Intent.MATCHUP, api.siteSearch("fischer spassky").intent)
+                assertEquals(SiteSearchPage.Kind.GAMES, api.siteSearchPage("fischer spassky", "games", 2).kind)
                 val probe = api.tablebase("8/8/8/8/8/2k5/2P5/2K5 w - - 0 1")
                 assertEquals("draw", probe.moves.single().wdl)
                 val requests = (1..9).map { server.takeRequest() }
@@ -63,6 +64,19 @@ class SiteApiTest {
             server.enqueue(MockResponse().setBody("{\"source\":\"public\",\"date\":\"2026-09-22\",\"game\":null}"))
             ClassicChessClient(ClientOptions(baseUrl = server.url("/").toString())).use { api ->
                 assertNull(api.dailyGame().game)
+            }
+        }
+    }
+
+    @Test fun enumValuesAddedByTheServerDecodeAsUnknown() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            val newer = JsonObject(fixtures.getValue("search_page").jsonObject + ("intent" to JsonPrimitive("opening")))
+            server.enqueue(MockResponse().setBody(newer.toString()))
+            ClassicChessClient(ClientOptions(baseUrl = server.url("/").toString())).use { api ->
+                val page = api.siteSearchPage("fischer spassky", "games")
+                assertEquals(SiteSearchPage.Intent.UNKNOWN_DEFAULT_OPEN_API, page.intent)
+                assertEquals(SiteSearchPage.Kind.GAMES, page.kind)
             }
         }
     }
