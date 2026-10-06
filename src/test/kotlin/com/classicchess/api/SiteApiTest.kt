@@ -68,6 +68,33 @@ class SiteApiTest {
         }
     }
 
+    @Test fun eventOfTheDayDecodesTheHomepagePickAndAnEmptyDay() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(MockResponse().setBody(
+                "{\"source\":\"public\",\"date\":\"2026-10-05\",\"event\":{\"name\":\"Karlsbad 1929\"," +
+                    "\"slug\":\"karlsbad-1929\",\"tagline\":\"Nimzowitsch's greatest triumph\"," +
+                    "\"winner\":{\"name\":\"Aron Nimzowitsch\",\"slug\":\"Aron_Nimzowitsch\"," +
+                    "\"portrait\":{\"image\":\"https://classicchess.com/static/n.jpg\"," +
+                    "\"thumbnail\":\"https://classicchess.com/static/thumbs/n.webp\"}," +
+                    "\"urls\":{\"api_detail\":\"/api/v1/public/players/Aron_Nimzowitsch/\"," +
+                    "\"html_about\":\"/players/Aron_Nimzowitsch/about/\"}}," +
+                    "\"urls\":{\"api_detail\":\"/api/v1/public/events/karlsbad-1929/\"," +
+                    "\"api_about\":\"/api/v1/public/events/karlsbad-1929/about/\"," +
+                    "\"html_about\":\"/events/karlsbad-1929/about/\"}}}",
+            ))
+            server.enqueue(MockResponse().setBody("{\"source\":\"public\",\"date\":\"2026-10-05\",\"event\":null}"))
+            ClassicChessClient(ClientOptions(baseUrl = server.url("/").toString())).use { api ->
+                val event = api.eventOfTheDay().event!!
+                assertEquals("karlsbad-1929", event.slug)
+                assertEquals("Aron_Nimzowitsch", event.winner.slug)
+                assertEquals("/api/v1/public/events/karlsbad-1929/about/", event.urls["api_about"])
+                assertNull(api.eventOfTheDay().event)
+                assertEquals("/api/v1/public/event-of-the-day/", server.takeRequest().path)
+            }
+        }
+    }
+
     @Test fun enumValuesAddedByTheServerDecodeAsUnknown() = runBlocking {
         MockWebServer().use { server ->
             server.start()

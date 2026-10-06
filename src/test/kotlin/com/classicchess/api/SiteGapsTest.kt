@@ -66,6 +66,7 @@ class SiteGapsTest {
             Triple(suspend { client.accountNotifications("t", 2, 20) }, "GET", "/api/v1/account/notifications/?page=2&page_size=20"),
             Triple(suspend { client.accountMarkNotificationRead(5, "t") }, "POST", "/api/v1/account/notifications/5/read/"),
             Triple(suspend { client.accountMarkAllNotificationsRead("t") }, "POST", "/api/v1/account/notifications/read-all/"),
+            Triple(suspend { client.accountDismissAllNotifications("t") }, "POST", "/api/v1/account/notifications/dismiss-all/"),
             Triple(suspend { client.accountDismissNotification(5, "t") }, "DELETE", "/api/v1/account/notifications/5/"),
             Triple(suspend { client.accountNotificationPreferences("t") }, "GET", "/api/v1/account/notifications/preferences/"),
             Triple(suspend { client.accountUpdateNotificationPreferences("t", mapOf("new_games" to false), true) },

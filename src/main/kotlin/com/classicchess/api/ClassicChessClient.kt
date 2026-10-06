@@ -159,6 +159,9 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
     suspend fun beginnerGames(): PublicBeginnerGames = read("/api/v1/public/beginner-games/", PublicBeginnerGames.serializer())
     /** Today's Game of the Day; `game` is null when none can be published. */
     suspend fun dailyGame(): PublicDailyGame = read("/api/v1/public/daily/", PublicDailyGame.serializer())
+    /** The homepage's Event of the day; `event` is null when none can be published. */
+    suspend fun eventOfTheDay(): PublicEventOfTheDay =
+        read("/api/v1/public/event-of-the-day/", PublicEventOfTheDay.serializer())
     /** The site search box's grouped preview of players, events and games. */
     suspend fun siteSearch(query: String): SiteSearchPreview =
         read("/api/v1/public/search/", SiteSearchPreview.serializer(), mapOf("q" to siteSearchQuery(query)))

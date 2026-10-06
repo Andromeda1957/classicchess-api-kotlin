@@ -169,6 +169,7 @@ openApiGenerate {
         "AnnotatedGame_allOf_annotation" to "AnnotatedGameAnnotation",
         "AnnotatedGame_allOf_annotation_notes" to "AnnotatedGameAnnotationNotesItem",
         "AnnotatedGame_allOf_book" to "AnnotatedGameBook",
+        "EventOfTheDayWinner_allOf_portrait" to "EventOfTheDayWinnerPortrait",
         "PublicPlayer_allOf_archive_bucket" to "PublicPlayerArchiveBucket",
         "PublicPlayer_allOf_portrait" to "PublicPlayerPortrait",
     ))

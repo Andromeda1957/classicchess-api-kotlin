@@ -98,6 +98,9 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
         request("/api/v1/account/notifications/" + positiveId(notificationId, "notification ID") + "/read/", "POST", token = token)
     suspend fun accountMarkAllNotificationsRead(token: String): ApplicationResponse =
         request("/api/v1/account/notifications/read-all/", "POST", token = token)
+    /** Empty the inbox: dismiss every notification in it. */
+    suspend fun accountDismissAllNotifications(token: String): ApplicationResponse =
+        request("/api/v1/account/notifications/dismiss-all/", "POST", token = token)
     suspend fun accountDismissNotification(notificationId: Long, token: String): ApplicationResponse =
         request("/api/v1/account/notifications/" + positiveId(notificationId, "notification ID") + "/", "DELETE", token = token)
     suspend fun accountNotificationPreferences(token: String): ApplicationResponse =

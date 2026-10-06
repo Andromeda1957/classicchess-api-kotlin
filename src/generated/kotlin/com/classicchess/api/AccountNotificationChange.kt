@@ -40,6 +40,7 @@ import kotlinx.serialization.encoding.Encoder
  * @param unreadCount
  * @param id
  * @param marked
+ * @param dismissed
  */
 @Serializable
 
@@ -55,7 +56,10 @@ data class AccountNotificationChange (
     val id: kotlin.Long? = null,
 
     @SerialName(value = "marked")
-    val marked: kotlin.Long? = null
+    val marked: kotlin.Long? = null,
+
+    @SerialName(value = "dismissed")
+    val dismissed: kotlin.Long? = null
 
 ) {
 
