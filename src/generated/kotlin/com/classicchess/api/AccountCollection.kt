@@ -41,6 +41,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param sort The collection's saved sort preference.
  * @param gameCount
  * @param urls Follow these links. Paths beginning with / resolve against the API origin.
+ * @param description
+ * @param isPlan
  */
 @Serializable
 
@@ -61,14 +63,20 @@ data class AccountCollection (
 
     /* Follow these links. Paths beginning with / resolve against the API origin. */
     @SerialName(value = "urls")
-    val urls: kotlin.collections.Map<kotlin.String, kotlin.String?>
+    val urls: kotlin.collections.Map<kotlin.String, kotlin.String?>,
+
+    @SerialName(value = "description")
+    val description: kotlin.String? = "",
+
+    @SerialName(value = "is_plan")
+    val isPlan: kotlin.Boolean? = false
 
 ) {
 
     /**
      * The collection's saved sort preference.
      *
-     * Values: ADDED,DATE_DESC,DATE_ASC,PLAYER,UNKNOWN_DEFAULT_OPEN_API
+     * Values: ADDED,DATE_DESC,DATE_ASC,PLAYER,MANUAL,UNKNOWN_DEFAULT_OPEN_API
      */
     @Serializable(with = SortSerializer::class)
     enum class Sort(val value: kotlin.String) {
@@ -76,6 +84,7 @@ data class AccountCollection (
         @SerialName(value = "date_desc") DATE_DESC("date_desc"),
         @SerialName(value = "date_asc") DATE_ASC("date_asc"),
         @SerialName(value = "player") PLAYER("player"),
+        @SerialName(value = "manual") MANUAL("manual"),
         @SerialName(value = "unknown_default_open_api") UNKNOWN_DEFAULT_OPEN_API("unknown_default_open_api");
     }
 

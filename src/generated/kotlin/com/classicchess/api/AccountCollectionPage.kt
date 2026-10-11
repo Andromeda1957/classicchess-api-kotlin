@@ -77,7 +77,7 @@ data class AccountCollectionPage (
     /**
      * The applied sort: the sort parameter, else the saved preference.
      *
-     * Values: ADDED,DATE_DESC,DATE_ASC,PLAYER,UNKNOWN_DEFAULT_OPEN_API
+     * Values: ADDED,DATE_DESC,DATE_ASC,PLAYER,MANUAL,UNKNOWN_DEFAULT_OPEN_API
      */
     @Serializable(with = SortSerializer::class)
     enum class Sort(val value: kotlin.String) {
@@ -85,6 +85,7 @@ data class AccountCollectionPage (
         @SerialName(value = "date_desc") DATE_DESC("date_desc"),
         @SerialName(value = "date_asc") DATE_ASC("date_asc"),
         @SerialName(value = "player") PLAYER("player"),
+        @SerialName(value = "manual") MANUAL("manual"),
         @SerialName(value = "unknown_default_open_api") UNKNOWN_DEFAULT_OPEN_API("unknown_default_open_api");
     }
 

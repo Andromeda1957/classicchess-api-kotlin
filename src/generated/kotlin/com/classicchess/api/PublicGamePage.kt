@@ -52,6 +52,12 @@ import kotlinx.serialization.encoding.Encoder
  * @param since
  * @param until
  * @param sort
+ * @param theme
+ * @param eco
+ * @param result
+ * @param annotationQ
+ * @param annotationAuthor
+ * @param annotationBook
  */
 @Serializable
 
@@ -101,7 +107,25 @@ data class PublicGamePage (
     val until: kotlin.Long? = null,
 
     @SerialName(value = "sort")
-    val sort: PublicGamePage.Sort? = null
+    val sort: PublicGamePage.Sort? = null,
+
+    @SerialName(value = "theme")
+    val theme: kotlin.collections.List<kotlin.String>? = null,
+
+    @SerialName(value = "eco")
+    val eco: kotlin.String? = "",
+
+    @SerialName(value = "result")
+    val result: kotlin.String? = "",
+
+    @SerialName(value = "annotation_q")
+    val annotationQ: kotlin.String? = "",
+
+    @SerialName(value = "annotation_author")
+    val annotationAuthor: kotlin.String? = "",
+
+    @SerialName(value = "annotation_book")
+    val annotationBook: kotlin.String? = ""
 
 ) {
 

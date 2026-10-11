@@ -57,6 +57,10 @@ import kotlinx.serialization.encoding.Encoder
  * @param opening
  * @param moveCount
  * @param importedAt
+ * @param position
+ * @param note
+ * @param studied
+ * @param studiedAt
  */
 @Serializable
 
@@ -124,7 +128,19 @@ data class AccountCollectionEntry (
     val moveCount: kotlin.Long? = null,
 
     @SerialName(value = "imported_at")
-    val importedAt: kotlin.String? = null
+    val importedAt: kotlin.String? = null,
+
+    @SerialName(value = "position")
+    val position: kotlin.Long? = 0,
+
+    @SerialName(value = "note")
+    val note: kotlin.String? = "",
+
+    @SerialName(value = "studied")
+    val studied: kotlin.Boolean? = false,
+
+    @SerialName(value = "studied_at")
+    val studiedAt: kotlin.String? = null
 
 ) {
 

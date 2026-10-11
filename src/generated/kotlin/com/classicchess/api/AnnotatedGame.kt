@@ -28,6 +28,7 @@ import com.classicchess.api.AnnotatedGameBook
 import com.classicchess.api.Mainline
 import com.classicchess.api.PlayerIdentity
 import com.classicchess.api.PublicGameMembershipsItem
+import com.classicchess.api.PublicGameThemesItem
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
@@ -51,6 +52,7 @@ import kotlinx.serialization.encoding.Encoder
  * @param urls Follow these links. Paths beginning with / resolve against the API origin.
  * @param book
  * @param `annotation`
+ * @param slug Canonical game slug for plan items and canonical PGN routes.
  * @param displayWhite
  * @param displayBlack
  * @param resultKey Outcome for the archive's focus player, or the protagonist.
@@ -59,6 +61,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param round
  * @param eco
  * @param opening
+ * @param themes
+ * @param studyFocus Original curated guidance, empty for unreviewed games.
  * @param eventRound Curated round label when sort=event.
  * @param moveCount
  * @param whiteElo
@@ -104,6 +108,10 @@ data class AnnotatedGame (
     @SerialName(value = "annotation")
     val `annotation`: AnnotatedGameAnnotation,
 
+    /* Canonical game slug for plan items and canonical PGN routes. */
+    @SerialName(value = "slug")
+    val slug: kotlin.String? = "",
+
     @SerialName(value = "display_white")
     val displayWhite: kotlin.String? = null,
 
@@ -128,6 +136,13 @@ data class AnnotatedGame (
 
     @SerialName(value = "opening")
     val opening: kotlin.String? = null,
+
+    @SerialName(value = "themes")
+    val themes: kotlin.collections.List<PublicGameThemesItem>? = null,
+
+    /* Original curated guidance, empty for unreviewed games. */
+    @SerialName(value = "study_focus")
+    val studyFocus: kotlin.String? = "",
 
     /* Curated round label when sort=event. */
     @SerialName(value = "event_round")
