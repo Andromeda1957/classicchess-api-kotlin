@@ -178,6 +178,54 @@ class SiteGapsTest {
         assertEquals(0, server.requestCount)
     }
 
+    @Test fun puzzleCallsUseExactMethodsPathsAndBodies() = runBlocking {
+        val base = "/api/v1/account/puzzles/"
+        val cases = listOf<Triple<suspend () -> ApplicationResponse, String, Pair<String, String?>>>(
+            Triple(suspend { client.accountPuzzles("t") }, "GET", base to null),
+            Triple(suspend { client.accountPuzzleNext("t") }, "GET", "${base}next/" to null),
+            Triple(suspend { client.accountPuzzleNext("t", "p-000ccc1f") }, "GET", "${base}next/?after=p-000ccc1f" to null),
+            Triple(suspend { client.accountPuzzle("p-000ccc1f", "t") }, "GET", "${base}p-000ccc1f/" to null),
+            Triple(suspend { client.accountPuzzleResult("p-000ccc1f", "missed", "t") }, "POST",
+                "${base}p-000ccc1f/result/" to "{ \"result\": \"missed\" }"),
+            Triple(suspend { client.accountPuzzleHistory("t", 2, 10) }, "GET", "${base}history/?page=2&page_size=10" to null),
+            Triple(suspend { client.accountPuzzleReset("t") }, "POST", "${base}reset/" to ""),
+        )
+        for ((call, method, expected) in cases) {
+            server.enqueue(MockResponse().setBody("{ \"ok\": true }"))
+            assertTrue(call().ok)
+            val request = sent()
+            assertEquals(method, request.method)
+            assertEquals(expected.first, request.path)
+            assertEquals("Bearer t", request.getHeader("Authorization"))
+            val body = request.body.readUtf8()
+            when (val json = expected.second) {
+                null, "" -> assertEquals("", body)
+                else -> assertEquals(Json.parseToJsonElement(json), Json.parseToJsonElement(body))
+            }
+        }
+    }
+
+    @Test fun puzzleRepliesDecodeIntoTheGeneratedModels() = runBlocking<Unit> {
+        server.enqueue(MockResponse().setBody(PUZZLE))
+        val puzzle = LENIENT.decodeFromJsonElement(Puzzle.serializer(), client.accountPuzzle("p-000ccc1f", "t").data)
+        assertEquals(Puzzle.Solver.WHITE, puzzle.solver)
+        assertEquals(listOf("Qxf7#"), puzzle.solution.mainSan)
+        assertEquals(listOf("h5f7"), puzzle.solution.moves.filter { it.after.isEmpty() }.map { it.move })
+        assertEquals(null, puzzle.game)
+        sent()
+    }
+
+    @Test fun puzzleHelpersRejectInvalidArgumentsBeforeSending() = runBlocking {
+        val invalid = listOf<suspend () -> Unit>(
+            { client.accountPuzzle("../me", "t") }, { client.accountPuzzle("p-000CCC1F", "t") },
+            { client.accountPuzzleNext("t", "p-1") }, { client.accountPuzzleResult("p-000ccc1f", "skipped", "t") },
+            { client.accountPuzzleResult("p-000ccc1f/..", "solved", "t") },
+            { client.accountPuzzleHistory("t", 0) }, { client.accountPuzzleHistory("t", 1, 101) },
+        )
+        for (call in invalid) assertFailsWith<ApiException> { call() }
+        assertEquals(0, server.requestCount)
+    }
+
     @Test fun bearersReachOnlyGifRoutesAndUnsafeArgumentsNeverSend() = runBlocking {
         for (path in listOf("/api/v1/public/games/g1/", "/api/v1/public/games/g1/pgn/", "/api/v1/public/games/g1/gif/extra/",
             "/api/v1/public/imported-games/ann/g1/")) {
@@ -218,3 +266,15 @@ private const val GYM_STATE = """{"id": 7, "bot": "morphy", "bot_name": "Paul Mo
  "can_abort": false, "clock": {"initial_ms": 180000, "increment_ms": 0, "white_ms": 179000, "black_ms": 180000,
  "running": "black"}, "bot_to_move": true, "opening": "King's Pawn Game", "time_control": "3+0",
  "created_at": "2026-09-25T12:00:00+00:00", "urls": {"api": "/api/v1/account/gym/games/7/"}, "extra": 1}"""
+
+private const val PUZZLE = """{"id": "p-000ccc1f", "heading": "Puzzle from Attacker, A vs Defender, D, 1910",
+  "prompt": "Find the best move for White.", "solver": "white", "white": "Attacker, A", "black": "Defender, D",
+  "event": "Club Match", "year": 1910, "goal": "mate", "goal_label": "Checkmate", "mate_in": 1,
+  "start_fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+  "lead": ["e2e4", "e7e5", "f1c4", "b8c6", "d1h5", "g8f6"],
+  "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+  "solution": {"main": ["h5f7"], "main_san": ["Qxf7#"],
+    "moves": [{"after": [], "move": "h5f7", "reply": null, "from_game": true}]},
+  "info_rows": [{"label": "Event", "value": "Club Match"}], "game": null,
+  "urls": {"api": "/api/v1/account/puzzles/p-000ccc1f/", "result": "/api/v1/account/puzzles/p-000ccc1f/result/",
+    "next": "/api/v1/account/puzzles/next/?after=p-000ccc1f", "html": "/puzzles/p-000ccc1f/"}}"""

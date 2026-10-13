@@ -135,6 +135,7 @@ Missing biographies are `null`, and notable lists can be empty.
 | Notifications | `accountNotifications(token, page, pageSize)`, `accountMarkNotificationRead(id, token)`, `accountMarkAllNotificationsRead(token)`, `accountDismissNotification(id, token)`, `accountDismissAllNotifications(token)`, `accountNotificationPreferences(token)`, `accountUpdateNotificationPreferences(token, topics, soundEnabled)` |
 | Notebook exports | `accountNotebooks(token)`, `accountNotebook(uuid, token)`, `accountNotebookChapterPgn(uuid, chapterId, token)`, `accountNotebookFile(uuid, token, password)` |
 | Play the Gym's bots | `accountGym(token)`, `accountGymGames(token, page, pageSize)`, `accountGymNewGame(botKey, token, color, time, minutes, increment)`, `accountGymGame(id, token)`, `accountGymMove(id, uci, ply, token)`, `accountGymBotMove(id, ply, token)`, `accountGymTakeBack(id, token)`, `accountGymResign(id, token)`, `accountGymClock(id, token)`, `accountGymAbort(id, token)`, `accountGymDeleteGame(id, token)`, `accountGymGamePgn(id, token)` |
+| Puzzles | `accountPuzzles(token)`, `accountPuzzleNext(token, after)`, `accountPuzzle(id, token)`, `accountPuzzleResult(id, "solved" or "missed", token)`, `accountPuzzleHistory(token, page, pageSize)`, `accountPuzzleReset(token)` |
 | Notebook, Remote, Cast and other application APIs | `ApplicationClient.request(...)`, `requestBytes(...)`, `download(...)` for files |
 | Scanner upload | `ApplicationClient.scanPosition(jpegBytes, token)` |
 
@@ -222,6 +223,59 @@ fun main() = runBlocking {
             reply = api.accountGymBotMove(game.id, game.ply.toInt(), token)
         }
         println("${reply.status}: ${reply.data["sans"]}")
+    }
+}
+```
+
+### Play puzzles
+
+Puzzles come from master games and are for signed-in accounts only. Personal
+tokens need `puzzles:read` to read puzzles, figures and history and
+`puzzles:write` to save a result or reset; cookie sessions are never enough.
+Each account has its own rotation: a puzzle solved on the first try leaves it
+until reset, and a missed one stays. A puzzle carries the game so far
+(`start_fen` and `lead`), the position (`fen`) and `solution.moves`: the
+accepted solver moves at each point are the entries whose `after` equals the
+moves played so far. Save each play once, `missed` at the first wrong move or
+when the solution is shown and `solved` for a clean finish. A 404
+`rotation_empty` reply means every puzzle is solved; reset to play them again.
+Decode replies with the generated models, such as `Puzzle`. This plays one
+puzzle in the terminal and saves how it went:
+
+```kotlin
+import com.classicchess.api.ApplicationClient
+import com.classicchess.api.Puzzle
+import com.classicchess.api.PuzzleResultSaved
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+
+private val json = Json { ignoreUnknownKeys = true }
+
+fun main() = runBlocking {
+    val token = requireNotNull(System.getenv("CLASSICCHESS_API_TOKEN")) { "Set a token with puzzles:read and puzzles:write" }
+    ApplicationClient().use { api ->
+        val next = api.accountPuzzleNext(token)
+        check(next.ok) { "${next.status}: ${next.data}" }
+        val puzzle = json.decodeFromJsonElement(Puzzle.serializer(), next.data)
+        println("${puzzle.prompt} ${puzzle.fen}")
+        val played = mutableListOf<String>()
+        var result = "solved"
+        while (true) {
+            print("Your move in UCI, such as e2e4: ")
+            val answer = readln().trim()
+            val step = puzzle.solution.moves.firstOrNull { it.move == answer && it.after == played }
+            if (step == null) {
+                result = "missed"
+                break
+            }
+            played += answer
+            val reply = step.reply ?: break
+            println("Reply: $reply")
+            played += reply
+        }
+        val saved = json.decodeFromJsonElement(PuzzleResultSaved.serializer(),
+            api.accountPuzzleResult(puzzle.id, result, token).data)
+        println("${saved.result.value}: ${saved.summary}")
     }
 }
 ```

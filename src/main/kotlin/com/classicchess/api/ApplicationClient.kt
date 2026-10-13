@@ -194,6 +194,35 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
     suspend fun accountGymDeleteGame(gameId: Long, token: String): ApplicationResponse =
         request(gymGame(gameId), "DELETE", token = token)
 
+    // Puzzles, for signed-in accounts only. Personal tokens need puzzles:read to
+    // read and puzzles:write to save results and reset; device sessions pass both.
+    // Decode replies with the generated models, for example Puzzle.serializer().
+    /** Your figures: first-try solves, misses, what is left in your rotation, and the total. */
+    suspend fun accountPuzzles(token: String): ApplicationResponse = request("/api/v1/account/puzzles/", token = token)
+    /**
+     * A random puzzle from your rotation, another than [after] (the one just played) when there is
+     * one. A 404 rotation_empty means every puzzle is solved; reset to play them again.
+     */
+    suspend fun accountPuzzleNext(token: String, after: String? = null): ApplicationResponse =
+        request("/api/v1/account/puzzles/next/" + (after?.let { "?after=" + puzzleId(it) } ?: ""), token = token)
+    suspend fun accountPuzzle(id: String, token: String): ApplicationResponse =
+        request("/api/v1/account/puzzles/" + puzzleId(id) + "/", token = token)
+    /**
+     * Save one play: "missed" at the first wrong move or when the solution is shown, "solved" for a
+     * clean finish. A first-try solve stands until reset, so the saved result can differ.
+     */
+    suspend fun accountPuzzleResult(id: String, result: String, token: String): ApplicationResponse {
+        if (result !in listOf("solved", "missed")) throw ApiException("result must be solved or missed.", "invalid_request")
+        return request("/api/v1/account/puzzles/" + puzzleId(id) + "/result/", "POST",
+            buildJsonObject { put("result", result) }.toString(), token)
+    }
+    /** The puzzles you have played and how you did, most recent first. */
+    suspend fun accountPuzzleHistory(token: String, page: Int = 1, pageSize: Int = 20): ApplicationResponse =
+        request("/api/v1/account/puzzles/history/?" + libraryPage(page, pageSize), token = token)
+    /** Every puzzle goes back into your rotation. Your history stays. */
+    suspend fun accountPuzzleReset(token: String): ApplicationResponse =
+        request("/api/v1/account/puzzles/reset/", "POST", token = token)
+
     /** Binary notebook requests preserve their original bytes and media type. */
     suspend fun requestBytes(path: String, body: ByteArray, token: String? = null, method: String = "POST",
         contentType: String = "application/octet-stream", timeoutMillis: Long? = null): ApplicationResponse {
@@ -309,6 +338,13 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
         private val UCI_MOVE = Regex("[a-h][1-8][a-h][1-8][qrbn]?")
 
         private fun gymGame(gameId: Long): String = "/api/v1/account/gym/games/" + positiveId(gameId, "game ID") + "/"
+
+        private val PUZZLE_ID = Regex("p-[0-9a-f]{8}")
+
+        private fun puzzleId(value: String): String {
+            if (!PUZZLE_ID.matches(value)) throw ApiException("Use a puzzle ID such as p-000ccc1f.", "invalid_request")
+            return value
+        }
 
         private fun ply(value: Int): Int {
             if (value < 0) throw ApiException("Use the ply from the game state: a whole number from 0.", "invalid_request")
