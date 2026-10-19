@@ -130,7 +130,10 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
         }
     suspend fun publicPlayers(query: String? = null): PublicPlayers =
         read("/api/v1/public/players/", PublicPlayers.serializer(), mapOf("q" to query))
-    suspend fun playerNames(query: String? = null): List<String> = publicPlayers(query).results.map { it.name }
+    /** The players catalog for lists and pickers: biography headline only, about a tenth the size. */
+    suspend fun publicPlayerCards(query: String? = null): PublicPlayerCards =
+        read("/api/v1/public/players/cards/", PublicPlayerCards.serializer(), mapOf("q" to query))
+    suspend fun playerNames(query: String? = null): List<String> = publicPlayerCards(query).results.map { it.name }
     suspend fun publicPlayer(slug: String): PublicPlayerDetail =
         read("/api/v1/public/players/${segment(slug)}/", PublicPlayerDetail.serializer())
     suspend fun publicPlayerBio(slug: String): PublicPlayerBiography =
@@ -162,6 +165,9 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
     /** The homepage's Event of the day; `event` is null when none can be published. */
     suspend fun eventOfTheDay(): PublicEventOfTheDay =
         read("/api/v1/public/event-of-the-day/", PublicEventOfTheDay.serializer())
+    /** Every face of today's homepage card; each of player, game, onThisDay and event is null when absent. */
+    suspend fun todaysPicks(): PublicTodaysPicks =
+        read("/api/v1/public/todays-picks/", PublicTodaysPicks.serializer())
     /** The site search box's grouped preview of players, events and games. */
     suspend fun siteSearch(query: String): SiteSearchPreview =
         read("/api/v1/public/search/", SiteSearchPreview.serializer(), mapOf("q" to siteSearchQuery(query)))
@@ -176,8 +182,12 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
         if (fen.isBlank() || fen.toByteArray(Charsets.UTF_8).size > 200) throw ApiException("Use a FEN of at most 200 bytes.", "invalid_query")
         return read("/api/v1/tablebase/", TablebaseProbe.serializer(), mapOf("fen" to fen))
     }
-    suspend fun annotatedBooks(): AnnotatedBooks = read("/api/v1/annotated/books/", AnnotatedBooks.serializer())
-    suspend fun bookTitles(): List<String> = annotatedBooks().results.map { it.label }
+    suspend fun annotatedBooks(ccnbFormat: Int? = null): AnnotatedBooks =
+        decode(transport.url("/api/v1/annotated/books/"), AnnotatedBooks.serializer(), ccnbFormat)
+    suspend fun bookTitles(ccnbFormat: Int? = null): List<String> = annotatedBooks(ccnbFormat).results.map { it.label }
+    /** Exact package bytes; use the same ccnbFormat as annotatedBooks for matching revisions. */
+    suspend fun annotatedNotebookFile(bookSlug: String, ccnbFormat: Int? = null): ByteArray =
+        transport.ccnbDownload(bookSlug, ccnbFormat)
     suspend fun publicGames(filters: PublicGameFilters = PublicGameFilters()): PublicGamePage =
         read("/api/v1/public/games/", PublicGamePage.serializer(), gameQuery(filters))
     suspend fun publicGame(token: String): PublicGame =
@@ -227,8 +237,8 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
 
     private suspend fun <T> read(path: String, serializer: DeserializationStrategy<T>, params: Map<String, Any?> = emptyMap()): T =
         decode(transport.url(path, params), serializer)
-    private suspend fun <T> decode(url: HttpUrl, serializer: DeserializationStrategy<T>): T {
-        val text = transport.read(url, "application/json")
+    private suspend fun <T> decode(url: HttpUrl, serializer: DeserializationStrategy<T>, ccnbFormat: Int? = null): T {
+        val text = transport.read(url, "application/json", ccnbFormat)
         return withContext(Dispatchers.Default) {
             try { json.decodeFromString(serializer, text) }
             catch (error: SerializationException) { throw ApiException("Response does not match the API schema.", "invalid_response", cause = error) }

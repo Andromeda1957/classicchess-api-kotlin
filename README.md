@@ -107,8 +107,10 @@ Missing biographies are `null`, and notable lists can be empty.
 | Capability | Kotlin methods |
 | --- | --- |
 | API discovery | `discovery()` |
-| Player, event and book catalogs | `publicPlayers()`, `publicEvents()`, `annotatedBooks()` |
+| Player, event and book catalogs | `publicPlayers()`, `publicEvents()`, `annotatedBooks(ccnbFormat = 3)`; format is optional |
+| Annotated Notebook packages | `annotatedNotebookFile(bookSlug, ccnbFormat = 3)` returns exact bytes |
 | Names and titles only | `playerNames()`, `eventNames()`, `bookTitles()` |
+| Player cards for lists and pickers | `publicPlayerCards()` returns every player with only the biography headline (epithet, lifespan, crown), about a tenth the size of `publicPlayers()`; `playerNames()` reads it |
 | Profiles, biographies and notable games | `publicPlayer(slug)`, `publicPlayerBio(slug)`, `publicNotableGames(slug)` |
 | Event series | `eventSeries(query = ...)` or `eventSeries(series = ...)` |
 | Public game lists, detail and PGN | `publicGames()`, `publicGame(token)`, `publicPgn(token)` |
@@ -124,6 +126,7 @@ Missing biographies are `null`, and notable lists can be empty.
 | Photo gallery | `gallery(GalleryFilters(query, page, pageSize))`, `galleryPhoto(photoId)` |
 | Beginner games and Game of the Day | `beginnerGames()`, `dailyGame()` |
 | Event of the day | `eventOfTheDay()` returns the landmark event on today's homepage, its tagline and pictured winner; `event` is null when none can be published |
+| Today's homepage card | `todaysPicks()` returns the Player of the day, Game of the Day, On this day game and Event of the day in one read, with portraits where available; each is null when absent |
 | Site search | `siteSearch(query)` for a preview; `siteSearchPage(query, kind, page)` for one paginated kind: `games`, `events` or `players` |
 | Endgame tablebase | `tablebase(fen)` uses local Syzygy tables and falls back to the Lichess tablebase for larger positions, as the site does |
 | Account collections | `ApplicationClient.accountMe(token)`, `accountCollections(token)`, `accountCreateCollection(name, token)`, `accountImportPublicPlayerGames(archivePlayer, token, ...)` |
@@ -133,7 +136,7 @@ Missing biographies are `null`, and notable lists can be empty.
 | Public imported games | `publicImportedGame(username, gameSlug)`, `publicImportedPgn(username, gameSlug)` read a game another account imported and made public, by its page address |
 | GIF exports | `ApplicationClient.masterGameGif(gameToken, token)`, `publicGameGif(slug, token)`, `annotatedGameGif(bookSlug, gameSlug, token)`, `publicImportedGameGif(username, slug, token)`, `accountImportedGameGif(slug, token)`; pass `orientation = "black"` to flip the board |
 | Notifications | `accountNotifications(token, page, pageSize)`, `accountMarkNotificationRead(id, token)`, `accountMarkAllNotificationsRead(token)`, `accountDismissNotification(id, token)`, `accountDismissAllNotifications(token)`, `accountNotificationPreferences(token)`, `accountUpdateNotificationPreferences(token, topics, soundEnabled)` |
-| Notebook exports | `accountNotebooks(token)`, `accountNotebook(uuid, token)`, `accountNotebookChapterPgn(uuid, chapterId, token)`, `accountNotebookFile(uuid, token, password)` |
+| Notebook exports | `accountNotebooks(token)`, `accountNotebook(uuid, token)`, `accountNotebookChapterPgn(uuid, chapterId, token)`, `accountNotebookFile(uuid, token, password, ccnbFormat = 3)` |
 | Play the Gym's bots | `accountGym(token)`, `accountGymGames(token, page, pageSize)`, `accountGymNewGame(botKey, token, color, time, minutes, increment)`, `accountGymGame(id, token)`, `accountGymMove(id, uci, ply, token)`, `accountGymBotMove(id, ply, token)`, `accountGymTakeBack(id, token)`, `accountGymResign(id, token)`, `accountGymClock(id, token)`, `accountGymAbort(id, token)`, `accountGymDeleteGame(id, token)`, `accountGymGamePgn(id, token)` |
 | Puzzles | `accountPuzzles(token)`, `accountPuzzleNext(token, after)`, `accountPuzzle(id, token)`, `accountPuzzleResult(id, "solved" or "missed", token)`, `accountPuzzleHistory(token, page, pageSize)`, `accountPuzzleReset(token)` |
 | Notebook, Remote, Cast and other application APIs | `ApplicationClient.request(...)`, `requestBytes(...)`, `download(...)` for files |
@@ -178,7 +181,15 @@ including HTTP errors such as conflicts. `request` accepts JSON text;
 session credentials have different permissions; use the credential required
 by the endpoint. Credentials are never stored by the client or sent on public reads.
 
-GIF, chapter PGN and Notebook file methods return an `ApplicationDownload` with
+Notebook downloads accept `ccnbFormat = 2` for legacy exchange or
+`ccnbFormat = 3` for the binary record container. Omission retains legacy
+behavior. Use the same format for the annotated catalog and package so their
+revisions match. The public package helper returns a `ByteArray` from the fixed
+same-origin endpoint for a validated catalog slug, sends no account credentials,
+and rejects redirects. Unsupported values fail before a request. Capabilities
+unavailable in legacy exchange require format 3.
+
+GIF, chapter PGN and account Notebook file methods return an `ApplicationDownload` with
 `ok`, `status`, `bytes` (the file when `ok`), `contentType`, `filename`,
 `retryAfter` and `error` (the JSON error reply otherwise). GIF exports need a
 registered account, so any personal token or device session works, and they
@@ -297,6 +308,25 @@ handling rate limits. Response models accept new fields, and an enum value added
 the server decodes as that enum's `UNKNOWN_DEFAULT_OPEN_API` entry. Statistics and
 explorer helpers, the event crosstable and search result lists return JSON to
 preserve the API's complete data.
+
+## Connections and caching
+
+Every client in a process shares one connection pool, so a public client and
+an application client reuse the same TLS connection. Closing a client cancels
+only its own requests. To keep public responses between runs, give the
+clients a cache directory:
+
+```kotlin
+val options = ClientOptions(httpCacheDirectory = File(cacheDir, "classicchess-http"))
+ClassicChessClient(options).use { api -> println(api.discovery().version) }
+```
+
+A fresh response (`Cache-Control: max-age`) is answered from disk, and a
+stale one is revalidated with `If-None-Match`, so an unchanged catalog costs
+a `304 Not Modified` instead of its full body. Only requests without a bearer
+token read or write the cache; account responses never reach the disk.
+`httpCacheMaxBytes` bounds it (16 MiB by default), and clients given the
+same directory share one cache.
 
 ## Build and test this repository
 

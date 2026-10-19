@@ -36,14 +36,16 @@ import kotlinx.serialization.encoding.Encoder
 /**
  *
  *
- * @param players
+ * @param players Players in the curated players catalog.
  * @param publicGames
  * @param annotatedBooks
+ * @param eventSeries Series cards on the event-series catalog; absent from older servers.
  */
 @Serializable
 
 data class MobileHomeSummary (
 
+    /* Players in the curated players catalog. */
     @SerialName(value = "players")
     val players: kotlin.Long,
 
@@ -51,7 +53,11 @@ data class MobileHomeSummary (
     val publicGames: kotlin.Long,
 
     @SerialName(value = "annotated_books")
-    val annotatedBooks: kotlin.Long
+    val annotatedBooks: kotlin.Long,
+
+    /* Series cards on the event-series catalog; absent from older servers. */
+    @SerialName(value = "event_series")
+    val eventSeries: kotlin.Long? = null
 
 ) {
 

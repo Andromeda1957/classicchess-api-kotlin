@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.toList
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
+import okio.Buffer
 
 class ClientTest {
     private lateinit var server: MockWebServer
@@ -21,12 +22,40 @@ class ClientTest {
     private fun reply(json: String) { server.enqueue(MockResponse().setBody(json).setHeader("Content-Type", "application/json")) }
     private fun path() = server.takeRequest(2, TimeUnit.SECONDS)!!.path
 
+    @Test fun annotatedCatalogAndFixedPackageNegotiateMatchingFormats() = runBlocking {
+        val bytes = byteArrayOf(67, 67, 78, 66, 0, 3, -1)
+        for (format in listOf(null, 2, 3)) {
+            reply(books())
+            api.annotatedBooks(ccnbFormat = format)
+            val catalog = server.takeRequest(2, TimeUnit.SECONDS)!!
+            assertEquals("/api/v1/annotated/books/", catalog.path)
+            assertEquals(format?.toString(), catalog.getHeader("CCNB-Format"))
+            server.enqueue(MockResponse().setBody(Buffer().write(bytes)).setHeader("Content-Type", "application/vnd.classicchess.notebook"))
+            assertContentEquals(bytes, api.annotatedNotebookFile("my-system", ccnbFormat = format))
+            val download = server.takeRequest(2, TimeUnit.SECONDS)!!
+            assertEquals("/annotated/my-system/download/", download.path)
+            assertEquals(format?.toString(), download.getHeader("CCNB-Format"))
+            assertNull(download.getHeader("Authorization"))
+            assertNull(download.getHeader("Cookie"))
+        }
+        assertEquals("invalid_request", assertFailsWith<ApiException> { api.annotatedBooks(ccnbFormat = 4) }.code)
+        assertEquals("invalid_request", assertFailsWith<ApiException> { api.annotatedNotebookFile("my-system", ccnbFormat = 4) }.code)
+        for (slug in listOf("../book", "https://elsewhere.test/book", "book?format=3")) {
+            assertEquals("invalid_identifier", assertFailsWith<ApiException> { api.annotatedNotebookFile(slug) }.code)
+        }
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/annotated/other/download/"))
+        assertEquals("unsafe_redirect", assertFailsWith<ApiException> { api.annotatedNotebookFile("my-system", ccnbFormat = 3) }.code)
+        assertEquals(7, server.requestCount)
+    }
+
     @Test fun completeCatalogsAndNames() = runBlocking {
-        repeat(2) { reply(players()) }
+        repeat(3) { reply(players()) }
         assertEquals(3, api.publicPlayers().results.size)
-        assertEquals(listOf("Tal", "José Capablanca", "Petrosian"), api.playerNames())
         assertEquals("/api/v1/public/players/", path())
-        path()
+        assertEquals(3, api.publicPlayerCards().results.size)
+        assertEquals("/api/v1/public/players/cards/", path())
+        assertEquals(listOf("Tal", "José Capablanca", "Petrosian"), api.playerNames())
+        assertEquals("/api/v1/public/players/cards/", path())
         val events = """{"source":"public","query":"","count":3,"results":[${(1..3).joinToString { """{"slug":"event-$it","name":"Event $it","year":1900,"game_count":3,"expected_game_count":3,"event_type":{"key":"tournament","label":"Tournament"},"series":null,"source":{"event":"Event $it","site":"","year":1900},"urls":{}}""" }}]}"""
         repeat(2) { reply(events) }
         assertEquals(3, api.publicEvents().results.size)
@@ -38,7 +67,7 @@ class ClientTest {
         assertEquals(listOf("Book 1", "Book 2", "Book 3"), api.bookTitles())
         assertEquals("/api/v1/annotated/books/", path())
         path()
-        assertEquals(6, server.requestCount)
+        assertEquals(7, server.requestCount)
     }
 
     @Test fun profilesNullableBiosAndOrderedNotables() = runBlocking {

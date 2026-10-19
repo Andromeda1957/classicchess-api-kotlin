@@ -213,6 +213,8 @@ tasks.test {
         ?: file("../../docs/api/client-fixtures.json")
     inputs.file(fixtures)
     systemProperty("classicchess.fixtures", fixtures.absolutePath)
+    // Cache tests write real files; keep them on the caller's scratch disk when TMPDIR names one.
+    System.getenv("TMPDIR")?.takeIf { it.isNotBlank() }?.let { systemProperty("java.io.tmpdir", it) }
 }
 
 val documentationJar by tasks.registering(Jar::class) {

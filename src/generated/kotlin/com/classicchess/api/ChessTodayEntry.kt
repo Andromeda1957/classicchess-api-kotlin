@@ -24,6 +24,7 @@
 package com.classicchess.api
 
 import com.classicchess.api.ChessTodayEntryPhotograph
+import com.classicchess.api.ChessTodayEntryPlayer
 import com.classicchess.api.ChessTodayEntryRelatedItem
 import com.classicchess.api.ChessTodayEntrySourcesItem
 
@@ -48,6 +49,7 @@ import kotlinx.serialization.encoding.Encoder
  * @param related
  * @param targetUrl Notification destination; a public archive item or this date's JSON as fallback.
  * @param photograph
+ * @param player
  */
 @Serializable
 
@@ -80,7 +82,10 @@ data class ChessTodayEntry (
     val targetUrl: kotlin.String,
 
     @SerialName(value = "photograph")
-    val photograph: ChessTodayEntryPhotograph?
+    val photograph: ChessTodayEntryPhotograph?,
+
+    @SerialName(value = "player")
+    val player: ChessTodayEntryPlayer? = null
 
 ) {
 

@@ -95,6 +95,47 @@ class SiteApiTest {
         }
     }
 
+    @Test fun todaysPicksDecodesEveryHomepageFaceAndEmptyFaces() = runBlocking {
+        val portrait = "{\"image\":\"https://classicchess.com/static/p.jpg\"," +
+            "\"thumbnail\":\"https://classicchess.com/static/thumbs/p.webp\"}"
+        val summary = "\"token\":\"Garry_Kasparov/kk-1985\",\"slug\":\"kk-1985\"," +
+            "\"player\":{\"name\":\"Garry Kasparov\",\"slug\":\"Garry_Kasparov\"}," +
+            "\"display_white\":\"Karpov, Anatoly\",\"display_black\":\"Kasparov, Garry\",\"result\":\"0-1\"," +
+            "\"date\":\"1985.10.15\",\"year\":\"1985\",\"event\":\"World Championship\"," +
+            "\"descriptor\":\"Karpov vs Kasparov · 0–1 · World Championship\"," +
+            "\"urls\":{\"api_detail\":\"/api/v1/public/games/kk-1985/\"}"
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(MockResponse().setBody(
+                "{\"source\":\"public\",\"date\":\"2026-10-15\"," +
+                    "\"player\":{\"name\":\"Peter Romanovsky\",\"slug\":\"Peter_Romanovsky\"," +
+                    "\"title\":\"Two-time USSR Champion\",\"life_years\":\"1892–1964\",\"portrait\":$portrait," +
+                    "\"urls\":{\"api_detail\":\"/api/v1/public/players/Peter_Romanovsky/\"," +
+                    "\"html_about\":\"/players/Peter_Romanovsky/about/\"}}," +
+                    "\"game\":{$summary,\"portrait\":$portrait}," +
+                    "\"on_this_day\":{\"first\":\"Kasparov\",\"verb\":\"beat\",\"second\":\"Karpov\"," +
+                    "\"year\":1985,\"event\":\"World Championship\",\"game\":{$summary}}," +
+                    "\"event\":null}",
+            ))
+            server.enqueue(MockResponse().setBody(
+                "{\"source\":\"public\",\"date\":\"2026-10-15\",\"player\":null,\"game\":null," +
+                    "\"on_this_day\":null,\"event\":null}",
+            ))
+            ClassicChessClient(ClientOptions(baseUrl = server.url("/").toString())).use { api ->
+                val picks = api.todaysPicks()
+                assertEquals("Two-time USSR Champion", picks.player!!.title)
+                assertEquals("https://classicchess.com/static/p.jpg", picks.game!!.portrait!!.image)
+                assertEquals(1985, picks.onThisDay!!.year)
+                assertNull(picks.onThisDay!!.portrait)
+                assertNull(picks.event)
+                val empty = api.todaysPicks()
+                assertNull(empty.player)
+                assertNull(empty.game)
+                assertEquals("/api/v1/public/todays-picks/", server.takeRequest().path)
+            }
+        }
+    }
+
     @Test fun enumValuesAddedByTheServerDecodeAsUnknown() = runBlocking {
         MockWebServer().use { server ->
             server.start()

@@ -23,6 +23,7 @@
 
 package com.classicchess.api
 
+import com.classicchess.api.PublicDailyGamePortrait
 import com.classicchess.api.PublicGameSummary
 
 import kotlinx.serialization.Serializable
@@ -40,6 +41,7 @@ import kotlinx.serialization.encoding.Encoder
  * @param source
  * @param date
  * @param game
+ * @param portrait
  */
 @Serializable
 
@@ -52,7 +54,10 @@ data class PublicDailyGame (
     val date: kotlin.String,
 
     @SerialName(value = "game")
-    val game: PublicGameSummary?
+    val game: PublicGameSummary?,
+
+    @SerialName(value = "portrait")
+    val portrait: PublicDailyGamePortrait? = null
 
 ) {
 

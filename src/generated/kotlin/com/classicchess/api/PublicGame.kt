@@ -23,6 +23,7 @@
 
 package com.classicchess.api
 
+import com.classicchess.api.GamePlayerPortraits
 import com.classicchess.api.Mainline
 import com.classicchess.api.PlayerIdentity
 import com.classicchess.api.PublicGameMembershipsItem
@@ -66,6 +67,7 @@ import kotlinx.serialization.encoding.Encoder
  * @param pgn
  * @param mainline
  * @param memberships
+ * @param portraits
  */
 @Serializable
 
@@ -154,7 +156,10 @@ data class PublicGame (
     val mainline: Mainline? = null,
 
     @SerialName(value = "memberships")
-    val memberships: kotlin.collections.List<PublicGameMembershipsItem>? = null
+    val memberships: kotlin.collections.List<PublicGameMembershipsItem>? = null,
+
+    @SerialName(value = "portraits")
+    val portraits: GamePlayerPortraits? = null
 
 ) {
 

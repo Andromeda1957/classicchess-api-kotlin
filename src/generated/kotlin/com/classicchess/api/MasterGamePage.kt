@@ -24,6 +24,8 @@
 package com.classicchess.api
 
 import com.classicchess.api.MasterGame
+import com.classicchess.api.MasterGamePagePlayerChoicesItem
+import com.classicchess.api.MasterGamePagePlayerSuggestionsItem
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
@@ -50,6 +52,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param message
  * @param hint
  * @param results
+ * @param playerChoices Selectable identities when a player name is ambiguous.
+ * @param playerSuggestions Full player names for spelling help when the query resolves to one player; search_name preserves any year constraint and game results remain available.
  */
 @Serializable
 
@@ -95,7 +99,15 @@ data class MasterGamePage (
     val hint: kotlin.String,
 
     @SerialName(value = "results")
-    val results: kotlin.collections.List<MasterGame>
+    val results: kotlin.collections.List<MasterGame>,
+
+    /* Selectable identities when a player name is ambiguous. */
+    @SerialName(value = "player_choices")
+    val playerChoices: kotlin.collections.List<MasterGamePagePlayerChoicesItem>? = null,
+
+    /* Full player names for spelling help when the query resolves to one player; search_name preserves any year constraint and game results remain available. */
+    @SerialName(value = "player_suggestions")
+    val playerSuggestions: kotlin.collections.List<MasterGamePagePlayerSuggestionsItem>? = null
 
 ) {
 

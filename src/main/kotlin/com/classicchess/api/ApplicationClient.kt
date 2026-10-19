@@ -125,12 +125,12 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
         download("/api/v1/account/notebooks/" + notebookUuid(notebook) + "/chapters/" + positiveId(chapterId, "chapter ID") + "/pgn/",
             token, accept = "application/x-chess-pgn")
     /** The whole Notebook as .ccnb bytes; a password (members only) encrypts it. */
-    suspend fun accountNotebookFile(notebook: String, token: String, password: String? = null): ApplicationDownload {
+    suspend fun accountNotebookFile(notebook: String, token: String, password: String? = null, ccnbFormat: Int? = null): ApplicationDownload {
         val path = "/api/v1/account/notebooks/" + notebookUuid(notebook) + "/file/"
         val accept = "application/vnd.classicchess.notebook"
-        if (password == null) return download(path, token, accept = accept)
+        if (password == null) return download(path, token, accept = accept, ccnbFormat = ccnbFormat)
         if (password.isEmpty()) throw ApiException("Use a non-empty password.", "invalid_request")
-        return download(path, token, "POST", buildJsonObject { put("password", password) }.toString(), accept)
+        return download(path, token, "POST", buildJsonObject { put("password", password) }.toString(), accept, ccnbFormat)
     }
 
     // The Gym: play the site's bots. Personal tokens need gym:read to read and
@@ -254,9 +254,9 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
 
     /** Fetch a file. The bytes are returned only for a 2xx; otherwise [ApplicationDownload.error] holds the JSON reply. */
     suspend fun download(path: String, token: String? = null, method: String = "GET", body: String? = null,
-        accept: String = "*/*"): ApplicationDownload {
+        accept: String = "*/*", ccnbFormat: Int? = null): ApplicationDownload {
         val requestBody = body?.toRequestBody("application/json; charset=utf-8".toMediaType())
-        val response = exchange(path, method, requestBody, token, null, accept)
+        val response = exchange(path, method, requestBody, token, null, accept, ccnbFormat)
         val ok = response.status in 200..299
         return ApplicationDownload(response.status, if (ok) response.bytes else ByteArray(0), response.contentType,
             if (ok) attachmentName(response.contentDisposition) else null, response.retryAfter,
@@ -278,7 +278,7 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
     }
 
     private suspend fun exchange(path: String, method: String, body: RequestBody?, token: String?,
-        timeoutMillis: Long?, accept: String): WireResponse {
+        timeoutMillis: Long?, accept: String, ccnbFormat: Int? = null): WireResponse {
         val uri = try { URI(path) } catch (error: Exception) {
             throw ApiException("Use a relative application API path.", "unsafe_url", cause = error)
         }
@@ -301,6 +301,13 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
         if (method !in listOf("GET", "POST", "PUT", "PATCH", "DELETE")) throw ApiException("Invalid API method.", "invalid_method")
         if (method == "GET" && body != null) throw ApiException("GET cannot carry a body.", "invalid_request")
         val request = Request.Builder().url(url).header("Accept", accept)
+        ccnbFormatHeader(ccnbFormat)?.let { header ->
+            val notebook = Regex("^/api/v1/account/notebooks/([^/]+)/file/" + "$").matchEntire(pathname)
+            if (notebook == null || !NOTEBOOK_UUID.matches(notebook.groupValues[1]) || uri.rawQuery != null) {
+                throw ApiException("CCNB negotiation requires the fixed Notebook file endpoint.", "invalid_request")
+            }
+            request.header("CCNB-Format", header)
+        }
         if (token != null) request.header("Authorization", "Bearer $token")
         request.method(method, body ?: if (method in listOf("POST", "PUT", "PATCH")) ByteArray(0).toRequestBody() else null)
         return transport.exchange(request.build(), timeoutMillis)

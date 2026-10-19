@@ -1,8 +1,12 @@
 package com.classicchess.api
 
 import java.io.Closeable
+import java.io.File
 import java.io.IOException
 import java.io.InterruptedIOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -10,9 +14,11 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.Cache
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.CookieJar
+import okhttp3.Dispatcher
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
@@ -36,6 +42,14 @@ data class ClientOptions(
     val maxResponseBytes: Long = 32L * 1024 * 1024,
     /** Android debug previews only: allow bearer requests to the emulator's host-loopback alias 10.0.2.2. */
     val allowInsecureEmulator: Boolean = false,
+    /**
+     * Optional HTTP cache for reads that carry no credentials. Fresh public
+     * responses are reused and stale ones revalidate with `If-None-Match`.
+     * Requests with a bearer token never read or write it. Clients given the
+     * same directory share one cache.
+     */
+    val httpCacheDirectory: File? = null,
+    val httpCacheMaxBytes: Long = 16L * 1024 * 1024,
 )
 
 internal fun segment(value: String): String {
@@ -59,6 +73,12 @@ internal fun gameToken(value: String): String {
     return parts.joinToString("/") { segment(it) }
 }
 
+internal fun ccnbFormatHeader(value: Int?): String? {
+    if (value == null) return null
+    if (value !in listOf(2, 3)) throw ApiException("CCNB format must be 2 or 3.", "invalid_request")
+    return value.toString()
+}
+
 internal class Transport(private val options: ClientOptions) : Closeable {
     private val masterReadPath = Regex("/api/v1/games/(?:g[0-9a-z]{1,66}-[0-9a-f]{12}/(?:pgn/)?)?")
     val base: HttpUrl = options.baseUrl.toHttpUrlOrNull()
@@ -70,15 +90,20 @@ internal class Transport(private val options: ClientOptions) : Closeable {
      * fresh connection. Writes use [client], which never replays a request.
      */
     private val readClient: OkHttpClient
+    /** [readClient] with the optional disk cache. Only requests without credentials use it. */
+    private val publicReadClient: OkHttpClient
     @Volatile private var closed = false
 
     init {
         if (base.encodedPath != "/" || base.username.isNotEmpty() || base.password.isNotEmpty()
             || base.query != null || base.fragment != null || options.timeoutMillis <= 0
-            || options.timeoutMillis > Int.MAX_VALUE || options.maxResponseBytes !in 1..Int.MAX_VALUE.toLong()) {
-            throw ApiException("Use an HTTP(S) origin and positive bounded timeout/response limits.", "invalid_options")
+            || options.timeoutMillis > Int.MAX_VALUE || options.maxResponseBytes !in 1..Int.MAX_VALUE.toLong()
+            || options.httpCacheMaxBytes <= 0) {
+            throw ApiException("Use an HTTP(S) origin and positive bounded timeout/response/cache limits.", "invalid_options")
         }
-        client = OkHttpClient.Builder()
+        // Every client in the process shares one dispatcher and connection pool,
+        // so an app's public and account clients reuse one TLS connection.
+        client = shared.newBuilder()
             .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
             .cookieJar(CookieJar.NO_COOKIES)
             .callTimeout(options.timeoutMillis, TimeUnit.MILLISECONDS)
@@ -86,6 +111,9 @@ internal class Transport(private val options: ClientOptions) : Closeable {
             .readTimeout(options.timeoutMillis, TimeUnit.MILLISECONDS)
             .build()
         readClient = client.newBuilder().retryOnConnectionFailure(true).build()
+        publicReadClient = options.httpCacheDirectory?.let { directory ->
+            readClient.newBuilder().cache(sharedCache(directory, options.httpCacheMaxBytes)).build()
+        } ?: readClient
     }
 
     fun url(path: String, query: Map<String, Any?> = emptyMap()): HttpUrl {
@@ -111,11 +139,30 @@ internal class Transport(private val options: ClientOptions) : Closeable {
         return url
     }
 
-    suspend fun read(url: HttpUrl, accept: String): String {
+    suspend fun read(url: HttpUrl, accept: String, ccnbFormat: Int? = null): String {
         safeUrl(url.toString())
-        val response = exchange(Request.Builder().url(url).header("Accept", accept).get().build())
+        val request = Request.Builder().url(url).header("Accept", accept).get()
+        ccnbFormatHeader(ccnbFormat)?.let { header ->
+            if (url.encodedPath != "/api/v1/annotated/books/" || url.query != null) {
+                throw ApiException("CCNB negotiation requires the fixed annotated catalog endpoint.", "invalid_request")
+            }
+            request.header("CCNB-Format", header)
+        }
+        val response = exchange(request.build())
         if (response.status !in 200..299) throw httpError(response)
         return response.text
+    }
+
+    suspend fun ccnbDownload(bookSlug: String, ccnbFormat: Int?): ByteArray {
+        val url = base.resolve("/annotated/${segment(bookSlug)}/download/")!!
+        val request = Request.Builder().url(url).header("Accept", "application/vnd.classicchess.notebook").get()
+        ccnbFormatHeader(ccnbFormat)?.let { request.header("CCNB-Format", it) }
+        val response = exchange(request.build())
+        if (response.status !in 200..299) throw httpError(response)
+        if (response.contentType?.startsWith("application/vnd.classicchess.notebook") != true) {
+            throw ApiException("Response was not a Notebook file.", "invalid_response")
+        }
+        return response.bytes
     }
 
     suspend fun exchange(request: Request, timeoutMillis: Long? = null): WireResponse = suspendCancellableCoroutine { continuation ->
@@ -132,10 +179,16 @@ internal class Transport(private val options: ClientOptions) : Closeable {
             throw ApiException("Use a timeout between 1 ms and ten minutes.", "invalid_options")
         }
         // Derived clients share the dispatcher and connection pool. Long scanner calls also need a longer read deadline.
-        val methodClient = if (request.method == "GET" || request.method == "HEAD") readClient else client
+        // A bearer response is private to its account, so it never reaches the disk cache.
+        val methodClient = when {
+            request.method != "GET" && request.method != "HEAD" -> client
+            request.header("Authorization") != null -> readClient
+            else -> publicReadClient
+        }
         val requestClient = if (timeoutMillis == null) methodClient else methodClient.newBuilder()
             .readTimeout(timeoutMillis, TimeUnit.MILLISECONDS).writeTimeout(timeoutMillis, TimeUnit.MILLISECONDS).build()
-        val call = requestClient.newCall(request.newBuilder().header("User-Agent", options.userAgent).build())
+        val call = requestClient.newCall(request.newBuilder().header("User-Agent", options.userAgent)
+            .tag(Transport::class.java, this).build())
         if (timeoutMillis != null) call.timeout().timeout(timeoutMillis, TimeUnit.MILLISECONDS)
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
@@ -181,11 +234,32 @@ internal class Transport(private val options: ClientOptions) : Closeable {
             response.status, response.retryAfter)
     }
 
+    /** Cancels this client's calls only; the shared pool keeps serving the process's other clients. */
     override fun close() {
         closed = true
-        client.dispatcher.cancelAll()
-        client.dispatcher.executorService.shutdown()
-        client.connectionPool.evictAll()
+        val dispatcher = client.dispatcher
+        (dispatcher.queuedCalls() + dispatcher.runningCalls())
+            .filter { it.request().tag(Transport::class.java) === this }
+            .forEach { it.cancel() }
+    }
+
+    private companion object {
+        /**
+         * Daemon dispatcher threads: closing a client no longer shuts the
+         * shared executor down, and an idle pool must not keep a JVM alive.
+         * Ten requests per host matches the two separate pools an app used to hold.
+         */
+        val shared: OkHttpClient = OkHttpClient.Builder()
+            .dispatcher(Dispatcher(ThreadPoolExecutor(0, Int.MAX_VALUE, 60, TimeUnit.SECONDS, SynchronousQueue()) { task ->
+                Thread(task, "classicchess-http").apply { isDaemon = true }
+            }).apply { maxRequestsPerHost = 10 })
+            .build()
+
+        /** OkHttp requires one [Cache] per directory, so clients given the same directory share it. */
+        private val caches = ConcurrentHashMap<String, Cache>()
+
+        fun sharedCache(directory: File, maxBytes: Long): Cache =
+            caches.computeIfAbsent(directory.absoluteFile.normalize().path) { Cache(File(it), maxBytes) }
     }
 }
 

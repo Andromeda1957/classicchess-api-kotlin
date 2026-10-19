@@ -27,6 +27,21 @@ class SiteGapsTest {
 
     private fun sent() = server.takeRequest(2, TimeUnit.SECONDS)!!
 
+    @Test fun ccnbFormatNegotiatesGetAndPasswordPost() = runBlocking {
+        for (format in listOf(null, 2, 3)) for (password in listOf(null, "test-only-password")) {
+            server.enqueue(file(gif, "application/vnd.classicchess.notebook", "n.ccnb"))
+            assertContentEquals(gif, client.accountNotebookFile(notebook, "t", password, ccnbFormat = format).bytes)
+            val request = sent()
+            assertEquals("/api/v1/account/notebooks/$notebook/file/", request.path)
+            assertEquals(format?.toString(), request.getHeader("CCNB-Format"))
+            assertEquals("Bearer t", request.getHeader("Authorization"))
+            assertEquals(if (password == null) "GET" else "POST", request.method)
+        }
+        assertEquals("invalid_request", assertFailsWith<ApiException> { client.accountNotebookFile(notebook, "t", ccnbFormat = 4) }.code)
+        assertEquals("invalid_request", assertFailsWith<ApiException> { client.download("/api/v1/account/me/", "t", ccnbFormat = 3) }.code)
+        assertEquals(6, server.requestCount)
+    }
+
     @Test fun gifDownloadsSendTheBearerAndReturnExactBytes() = runBlocking {
         val cases = listOf<Pair<suspend () -> ApplicationDownload, String>>(
             suspend { client.masterGameGif("g1a2-0123456789ab", "t") } to "/api/v1/games/g1a2-0123456789ab/gif/",
