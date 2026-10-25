@@ -52,8 +52,9 @@ import kotlinx.serialization.encoding.Encoder
  * @param message
  * @param hint
  * @param results
+ * @param filtersApplied True when player, side and result constraints are applied before pagination.
  * @param playerChoices Selectable identities when a player name is ambiguous.
- * @param playerSuggestions Full player names for spelling help when the query resolves to one player; search_name preserves any year constraint and game results remain available.
+ * @param playerSuggestions Full player names for spelling help when the query resolves to a player or matchup; matchups include both players, search_name preserves any year constraint, and game results remain available.
  */
 @Serializable
 
@@ -101,11 +102,15 @@ data class MasterGamePage (
     @SerialName(value = "results")
     val results: kotlin.collections.List<MasterGame>,
 
+    /* True when player, side and result constraints are applied before pagination. */
+    @SerialName(value = "filters_applied")
+    val filtersApplied: kotlin.Boolean? = null,
+
     /* Selectable identities when a player name is ambiguous. */
     @SerialName(value = "player_choices")
     val playerChoices: kotlin.collections.List<MasterGamePagePlayerChoicesItem>? = null,
 
-    /* Full player names for spelling help when the query resolves to one player; search_name preserves any year constraint and game results remain available. */
+    /* Full player names for spelling help when the query resolves to a player or matchup; matchups include both players, search_name preserves any year constraint, and game results remain available. */
     @SerialName(value = "player_suggestions")
     val playerSuggestions: kotlin.collections.List<MasterGamePagePlayerSuggestionsItem>? = null
 

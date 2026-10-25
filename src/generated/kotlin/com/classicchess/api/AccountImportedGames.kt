@@ -46,6 +46,7 @@ import kotlinx.serialization.encoding.Encoder
  * @param pageSize
  * @param pageCount
  * @param results
+ * @param filtersApplied True when source constraints are applied before pagination.
  */
 @Serializable
 
@@ -73,7 +74,11 @@ data class AccountImportedGames (
     val pageCount: kotlin.Long,
 
     @SerialName(value = "results")
-    val results: kotlin.collections.List<AccountGame>
+    val results: kotlin.collections.List<AccountGame>,
+
+    /* True when source constraints are applied before pagination. */
+    @SerialName(value = "filters_applied")
+    val filtersApplied: kotlin.Boolean? = null
 
 ) {
 

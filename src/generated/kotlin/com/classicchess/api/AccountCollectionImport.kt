@@ -44,6 +44,10 @@ import kotlinx.serialization.encoding.Encoder
  * @param added
  * @param alreadyPresent
  * @param skipped
+ * @param processed Games processed in this curated_games batch.
+ * @param hasMore
+ * @param nextAfterGameId For curated_games, pass this cursor while has_more is true.
+ * @param dryRun
  */
 @Serializable
 
@@ -68,7 +72,21 @@ data class AccountCollectionImport (
     val alreadyPresent: kotlin.Long,
 
     @SerialName(value = "skipped")
-    val skipped: kotlin.Long
+    val skipped: kotlin.Long,
+
+    /* Games processed in this curated_games batch. */
+    @SerialName(value = "processed")
+    val processed: kotlin.Long? = null,
+
+    @SerialName(value = "has_more")
+    val hasMore: kotlin.Boolean? = null,
+
+    /* For curated_games, pass this cursor while has_more is true. */
+    @SerialName(value = "next_after_game_id")
+    val nextAfterGameId: kotlin.Long? = null,
+
+    @SerialName(value = "dry_run")
+    val dryRun: kotlin.Boolean? = null
 
 ) {
 

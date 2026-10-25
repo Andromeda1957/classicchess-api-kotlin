@@ -291,6 +291,64 @@ fun main() = runBlocking {
 }
 ```
 
+## Collections and curated bulk additions
+
+Use `library:read` for lookup and `library:write` for create,
+delete and bulk additions. `accountCreateCollection(name, token)` creates an
+empty collection. `accountFindCollection(name, token)` returns `count`/`results`
+for the exact name ignoring case (empty when absent). Use the returned ID.
+`accountDeleteCollection(id, token)` deletes the collection, memberships, notes
+and progress, keeping underlying games.
+
+`accountAddCuratedGames(collectionId, filters, token, ...)` processes one batch
+from curated games, never MasterDB or user imports. `CuratedGameFilter` accepts
+`players`, `events`, `since`, `until`, `notable`, `q`, `theme`, `eco`, `result`,
+`annotationQ`, `annotationAuthor`, and `annotationBook`. Criteria are AND inside
+a group; groups are OR; `exclude` subtracts groups. Player/event slug lists are
+OR; players match either participant, including event games. Resolve slugs with
+`ClassicChessClient.publicPlayers(...)` and `publicEvents(...)`. Years include
+unknown months/days. `listOf(CuratedGameFilter(notable = true))` selects all
+players' curated notable games.
+
+For every curated game played in 1920, this complete JVM example reads its token
+from the private environment. Run it in the example JVM project after replacing
+its `Main.kt` with the following (keep the project's package declaration):
+
+```kotlin
+import com.classicchess.api.*
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.*
+
+fun main() = runBlocking {
+    val token = requireNotNull(System.getenv("CLASSICCHESS_API_TOKEN"))
+    ApplicationClient().use { api ->
+        val created = api.accountCreateCollection("Curated games from 1920", token)
+        check(created.ok) { created.data.toString() }
+        val id = created.data.getValue("id").jsonPrimitive.long
+        val filters = listOf(CuratedGameFilter(since = 1920, until = 1920))
+        val preview = api.accountAddCuratedGames(id, filters, token, dryRun = true)
+        check(preview.ok) { preview.data.toString() }
+        println("Matched: ${preview.data["matched"]}")
+        var after = 0L
+        while (true) {
+            val reply = api.accountAddCuratedGames(id, filters, token, afterGameId = after)
+            check(reply.ok) { reply.data.toString() }
+            println("Added this batch: ${reply.data["added"]}")
+            if (!reply.data.getValue("has_more").jsonPrimitive.boolean) break
+            after = reply.data.getValue("next_after_game_id").jsonPrimitive.long
+        }
+    }
+}
+```
+
+`batchSize` is 1–1000, default 1000; `afterGameId` starts at 0. Keep filters and
+exclusions fixed. `matched` is the full live selection; `added`,
+`already_present` and `processed` are per batch. Dry runs write nothing; begin
+actual additions at 0. Retries preserve existing entries, notes and progress.
+There is no frozen catalog snapshot or automatic write retry. Stop on errors
+and retain the last successful cursor for resuming. HTTP errors retain their
+status/data; coroutine cancellation propagates normally.
+
 ## Errors and cancellation
 
 Public-client HTTP failures and transport failures throw `ApiException` with
@@ -348,6 +406,16 @@ Gradle plugin and committed. After a contract change, regenerate them and test:
 `./gradlew check` runs `checkContract`, which fails if the committed models drift
 from the contract.
 
+`gradle.lockfile` records resolved library/test dependencies, and
+`buildscript-gradle.lockfile` records plugin/build dependencies. Keep both in
+source control so builds and vulnerability inventories use the same versions.
+After changing dependency declarations, run
+`./gradlew resolveDependencyInventory --write-locks` and commit both the
+declarations and resulting lock changes. `./gradlew resolveDependencyInventory`
+checks every resolvable dependency graph without compiling or packaging; it is
+also part of `check`. Strict locking rejects missing configuration state as
+well as changes to a recorded graph.
+
 `./gradlew packageClient` is an optional contributor command that creates a local
 Maven repository ZIP in `artifacts/`; normal source installation does not need it.
 The other maintained SDKs have the same API capabilities:
@@ -357,3 +425,20 @@ See the [API reference](https://classicchess.com/api/) for endpoint permissions,
 response fields, rate limits and resource attribution. The SDK license covers
 its software; chess resources retain their own stated reuse terms.
 Issues and pull requests are welcome; see [CONTRIBUTING.md](https://github.com/Andromeda1957/classicchess-api-kotlin/blob/main/CONTRIBUTING.md).
+
+## Notebook annotation search and offline puzzle attempts
+
+These helpers require the matching server release. Use
+`accountNotebookAnnotationSearch(token, q = "king", kind = "comments", notebookUuid = uuid, limit = 50, cursor = cursor)`
+for annotations in owned and directly invited Notebooks. Hits include authorized PGN URLs,
+child-index paths and content versions. Follow non-null cursors even after empty pages;
+`complete = false` can report a partial scan.
+
+Use `accountPuzzleNext(token, result = "missed")` and
+`accountPuzzleHistory(token, result = "missed")` for current incorrect attempts.
+`accountPuzzleBatch(token, limit = 25)` downloads 1–100 playable puzzles. Persist the account ID,
+reset generation and puzzle revisions in account-separated private storage. Persist each
+attempt before `accountPuzzleResult(id, result, token, eventId, generation, revision)`.
+Retries keep the same UUID and original reset generation. Saved/duplicate responses acknowledge
+delivery; 409 stale_generation/stale_puzzle/event_conflict and 404 are terminal. Your app
+owns durable storage, network retry/backoff and sign-out cleanup.

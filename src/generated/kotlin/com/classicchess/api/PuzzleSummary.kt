@@ -40,6 +40,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param missed Puzzles missed since the last reset; they stay in the rotation.
  * @param rotation Puzzles the account still meets: every puzzle but its first-try solves.
  * @param total Published puzzles.
+ * @param accountId Stable authenticated account identity for isolating downloaded puzzles.
+ * @param generation Reset version. An offline attempt must keep the version from when it began.
  */
 @Serializable
 
@@ -59,7 +61,15 @@ data class PuzzleSummary (
 
     /* Published puzzles. */
     @SerialName(value = "total")
-    val total: kotlin.Long
+    val total: kotlin.Long,
+
+    /* Stable authenticated account identity for isolating downloaded puzzles. */
+    @SerialName(value = "account_id")
+    val accountId: kotlin.String? = null,
+
+    /* Reset version. An offline attempt must keep the version from when it began. */
+    @SerialName(value = "generation")
+    val generation: kotlin.Long? = null
 
 ) {
 

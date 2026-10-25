@@ -58,6 +58,7 @@ import kotlinx.serialization.encoding.Encoder
  * @param infoRows The source game's facts, else the puzzle's own.
  * @param game
  * @param urls
+ * @param revision Identity of these exact puzzle data, required when syncing a downloaded attempt.
  */
 @Serializable
 
@@ -120,7 +121,11 @@ data class Puzzle (
     val game: PuzzleGame?,
 
     @SerialName(value = "urls")
-    val urls: PuzzleUrls
+    val urls: PuzzleUrls,
+
+    /* Identity of these exact puzzle data, required when syncing a downloaded attempt. */
+    @SerialName(value = "revision")
+    val revision: kotlin.String? = null
 
 ) {
 

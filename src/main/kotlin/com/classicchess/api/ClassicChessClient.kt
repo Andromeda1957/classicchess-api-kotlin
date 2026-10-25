@@ -14,7 +14,10 @@ import kotlinx.serialization.json.JsonObject
 import okhttp3.HttpUrl
 
 data class PageOptions(val page: Int? = null, val pageSize: Int? = null)
-data class MasterGameFilters(val query: String, val page: Int? = null, val pageSize: Int? = null)
+data class MasterGameFilters(
+    val query: String, val page: Int? = null, val pageSize: Int? = null,
+    val player: String? = null, val side: String = "either", val result: String = "any",
+)
 data class MasterStatsFilters(val query: String? = null, val player: String? = null, val opponent: String? = null, val mode: String? = null)
 data class ExplorerFilters(val fen: String? = null, val play: String? = null, val moves: Int = 12,
     val topGames: Int? = null, val sourceType: String? = null, val sourceKey: String? = null)
@@ -56,7 +59,18 @@ private fun masterQuery(filters: MasterGameFilters): Map<String, Any?> {
     if (query.isBlank() || query.length > 240 || query.codePointCount(0, query.length) > 120) {
         throw ApiException("Use a nonempty MasterDB query of at most 120 characters.", "invalid_query")
     }
-    return pageQuery(PageOptions(filters.page, filters.pageSize)) + ("q" to query)
+    val player = filters.player.orEmpty().trim()
+    if (player.length > 160 || player.codePointCount(0, player.length) > 80 ||
+        filters.side !in listOf("either", "white", "black") ||
+        filters.result !in listOf("any", "win", "draw", "loss") ||
+        player.isEmpty() && (filters.side != "either" || filters.result != "any")) {
+        throw ApiException("Use a player of at most 80 characters, side either/white/black and result any/win/draw/loss.", "invalid_query")
+    }
+    return pageQuery(PageOptions(filters.page, filters.pageSize)) + mapOf(
+        "q" to query, "player" to player.takeIf { it.isNotEmpty() },
+        "side" to filters.side.takeIf { player.isNotEmpty() },
+        "result" to filters.result.takeIf { player.isNotEmpty() },
+    )
 }
 
 private fun siteSearchQuery(query: String): String {

@@ -40,6 +40,9 @@ import kotlinx.serialization.encoding.Encoder
  * @param id
  * @param result The saved result. A first-try solve stands until Reset puzzles, so replaying a solved puzzle never puts it back in the rotation.
  * @param summary
+ * @param status
+ * @param eventId
+ * @param generation
  */
 @Serializable
 
@@ -53,7 +56,16 @@ data class PuzzleResultSaved (
     val result: PuzzleResultSaved.Result,
 
     @SerialName(value = "summary")
-    val summary: PuzzleSummary
+    val summary: PuzzleSummary,
+
+    @SerialName(value = "status")
+    val status: PuzzleResultSaved.Status? = null,
+
+    @SerialName(value = "event_id")
+    val eventId: kotlin.String? = null,
+
+    @SerialName(value = "generation")
+    val generation: kotlin.Long? = null
 
 ) {
 
@@ -79,6 +91,31 @@ data class PuzzleResultSaved (
         }
 
         override fun serialize(encoder: Encoder, value: Result) {
+            encoder.encodeSerializableValue(kotlin.String.serializer(), value.value)
+        }
+    }
+    /**
+     *
+     *
+     * Values: SAVED,DUPLICATE,UNKNOWN_DEFAULT_OPEN_API
+     */
+    @Serializable(with = StatusSerializer::class)
+    enum class Status(val value: kotlin.String) {
+        @SerialName(value = "saved") SAVED("saved"),
+        @SerialName(value = "duplicate") DUPLICATE("duplicate"),
+        @SerialName(value = "unknown_default_open_api") UNKNOWN_DEFAULT_OPEN_API("unknown_default_open_api");
+    }
+
+    internal object StatusSerializer : KSerializer<Status> {
+        override val descriptor = kotlin.String.serializer().descriptor
+
+        override fun deserialize(decoder: Decoder): Status {
+            val value = decoder.decodeSerializableValue(kotlin.String.serializer())
+            return Status.entries.firstOrNull { it.value == value }
+                ?: Status.UNKNOWN_DEFAULT_OPEN_API
+        }
+
+        override fun serialize(encoder: Encoder, value: Status) {
             encoder.encodeSerializableValue(kotlin.String.serializer(), value.value)
         }
     }

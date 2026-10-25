@@ -2,10 +2,13 @@ package com.classicchess.api
 
 import java.io.Closeable
 import java.net.URI
+import java.net.URLEncoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
@@ -16,6 +19,23 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 data class ApplicationResponse(val status: Int, val data: JsonObject, val retryAfter: String?) {
     val ok: Boolean get() = status in 200..299
+}
+
+/** AND criteria within one group; OR between groups. Players/events use curated catalog slugs. */
+data class CuratedGameFilter(
+    val players: List<String>? = null, val events: List<String>? = null,
+    val since: Int? = null, val until: Int? = null, val notable: Boolean? = null,
+    val q: String? = null, val theme: String? = null, val eco: String? = null, val result: String? = null,
+    val annotationQ: String? = null, val annotationAuthor: String? = null, val annotationBook: String? = null,
+) {
+    internal fun toJson(): JsonObject = buildJsonObject {
+        players?.let { put("players", JsonArray(it.map(::JsonPrimitive))) }
+        events?.let { put("events", JsonArray(it.map(::JsonPrimitive))) }
+        since?.let { put("since", it) }; until?.let { put("until", it) }; notable?.let { put("notable", it) }
+        q?.let { put("q", it) }; theme?.let { put("theme", it) }; eco?.let { put("eco", it) }; result?.let { put("result", it) }
+        annotationQ?.let { put("annotation_q", it) }; annotationAuthor?.let { put("annotation_author", it) }
+        annotationBook?.let { put("annotation_book", it) }
+    }
 }
 
 /** A file reply. [bytes] hold the GIF, PGN or .ccnb file only when [ok]; otherwise [error] holds the JSON reply. */
@@ -41,6 +61,33 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
     suspend fun accountCollections(token: String): ApplicationResponse = request("/api/v1/account/collections/", token = token)
     suspend fun accountCreateCollection(name: String, token: String): ApplicationResponse =
         request("/api/v1/account/collections/", "POST", buildJsonObject { put("name", name) }.toString(), token)
+    /** Exact name ignoring case. Returns count/results, empty when absent. */
+    suspend fun accountFindCollection(name: String, token: String): ApplicationResponse {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || trimmed.codePointCount(0, trimmed.length) > 120) {
+            throw ApiException("Use a collection name of 1–120 characters.", "invalid_request")
+        }
+        return request("/api/v1/account/collections/?name=" + URLEncoder.encode(trimmed, "UTF-8"), token = token)
+    }
+    /** Delete the collection, memberships, notes and progress; keep underlying games. */
+    suspend fun accountDeleteCollection(collectionId: Long, token: String): ApplicationResponse =
+        request("/api/v1/account/collections/" + positiveId(collectionId, "collection ID") + "/", "DELETE", token = token)
+    /** One curated-only batch. Keep selection unchanged; pass next_after_game_id while has_more is true.
+     * [dryRun] previews without writing. No automatic write retries; HTTP errors retain status/data.
+     */
+    suspend fun accountAddCuratedGames(collectionId: Long, filters: List<CuratedGameFilter>, token: String,
+        exclude: List<CuratedGameFilter> = emptyList(), batchSize: Int = 1000,
+        afterGameId: Long = 0, dryRun: Boolean = false): ApplicationResponse {
+        positiveId(collectionId, "collection ID")
+        if (batchSize !in 1..1000 || afterGameId !in 0..2147483647L) {
+            throw ApiException("Use a batch size from 1 to 1000 and a nonnegative game ID.", "invalid_request")
+        }
+        return request("/api/v1/account/collections/import/", "POST", buildJsonObject {
+            put("source", "curated_games"); put("collection_id", collectionId)
+            put("filters", JsonArray(filters.map { it.toJson() })); put("exclude", JsonArray(exclude.map { it.toJson() }))
+            put("batch_size", batchSize); put("after_game_id", afterGameId); put("dry_run", dryRun)
+        }.toString(), token)
+    }
     suspend fun accountImportPublicPlayerGames(archivePlayer: String, token: String, name: String? = null,
         collectionId: Long? = null, since: Int? = null, until: Int? = null): ApplicationResponse =
         request("/api/v1/account/collections/import/", "POST", buildJsonObject {
@@ -203,22 +250,50 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
      * A random puzzle from your rotation, another than [after] (the one just played) when there is
      * one. A 404 rotation_empty means every puzzle is solved; reset to play them again.
      */
-    suspend fun accountPuzzleNext(token: String, after: String? = null): ApplicationResponse =
-        request("/api/v1/account/puzzles/next/" + (after?.let { "?after=" + puzzleId(it) } ?: ""), token = token)
+    suspend fun accountPuzzleNext(token: String, after: String? = null, result: String? = null): ApplicationResponse {
+        val query = (after?.let { "&after=" + puzzleId(it) } ?: "") + puzzleFilter(result)
+        return request("/api/v1/account/puzzles/next/" + if (query.isEmpty()) "" else "?" + query.drop(1), token = token)
+    }
+    /** Download at most 100 playable puzzles with their account/reset identity. */
+    suspend fun accountPuzzleBatch(token: String, limit: Int = 25, result: String? = null): ApplicationResponse {
+        if (limit !in 1..100) throw ApiException("Use a batch size from 1 to 100.", "invalid_request")
+        return request("/api/v1/account/puzzles/batch/?limit=$limit" + puzzleFilter(result), token = token)
+    }
     suspend fun accountPuzzle(id: String, token: String): ApplicationResponse =
         request("/api/v1/account/puzzles/" + puzzleId(id) + "/", token = token)
     /**
      * Save one play: "missed" at the first wrong move or when the solution is shown, "solved" for a
      * clean finish. A first-try solve stands until reset, so the saved result can differ.
      */
-    suspend fun accountPuzzleResult(id: String, result: String, token: String): ApplicationResponse {
+    suspend fun accountPuzzleResult(id: String, result: String, token: String,
+        eventId: String? = null, generation: Long? = null, revision: String? = null): ApplicationResponse {
         if (result !in listOf("solved", "missed")) throw ApiException("result must be solved or missed.", "invalid_request")
+        val envelope = eventId != null || generation != null || revision != null
+        if (envelope && (eventId == null || !NOTEBOOK_UUID.matches(eventId) || generation == null || generation !in 0..9007199254740991L
+                || revision == null || !Regex("[0-9a-f]{64}").matches(revision))) {
+            throw ApiException("An offline attempt needs a UUID eventId, generation and puzzle revision.", "invalid_request")
+        }
         return request("/api/v1/account/puzzles/" + puzzleId(id) + "/result/", "POST",
-            buildJsonObject { put("result", result) }.toString(), token)
+            buildJsonObject {
+                put("result", result)
+                if (envelope) { put("event_id", eventId!!); put("generation", generation!!); put("revision", revision!!) }
+            }.toString(), token)
     }
     /** The puzzles you have played and how you did, most recent first. */
-    suspend fun accountPuzzleHistory(token: String, page: Int = 1, pageSize: Int = 20): ApplicationResponse =
-        request("/api/v1/account/puzzles/history/?" + libraryPage(page, pageSize), token = token)
+    suspend fun accountPuzzleHistory(token: String, page: Int = 1, pageSize: Int = 20, result: String? = null): ApplicationResponse =
+        request("/api/v1/account/puzzles/history/?" + libraryPage(page, pageSize) + puzzleFilter(result), token = token)
+
+    /** Search owned/directly invited Notebook annotations. Continue with cursor until null. */
+    suspend fun accountNotebookAnnotationSearch(token: String, q: String = "", kind: String = "all",
+        notebookUuid: String? = null, limit: Int = 50, cursor: String? = null): ApplicationResponse {
+        if (q.length > 128 || kind !in listOf("all", "comments", "glyphs", "diagrams") || limit !in 1..100
+                || (cursor?.length ?: 0) > 2048) throw ApiException("Use a bounded annotation query, kind and page size.", "invalid_query")
+        val query = linkedMapOf("q" to q, "kind" to kind, "limit" to limit.toString())
+        notebookUuid?.let { query["notebook_uuid"] = Companion.notebookUuid(it) }
+        cursor?.let { query["cursor"] = it }
+        val encoded = query.entries.joinToString("&") { (key, value) -> key + "=" + URLEncoder.encode(value, "UTF-8") }
+        return request("/api/v1/account/notebooks/annotation-search/?$encoded", token = token)
+    }
     /** Every puzzle goes back into your rotation. Your history stays. */
     suspend fun accountPuzzleReset(token: String): ApplicationResponse =
         request("/api/v1/account/puzzles/reset/", "POST", token = token)
@@ -318,6 +393,11 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
     private fun libraryPage(page: Int, pageSize: Int): String {
         if (page < 1 || pageSize !in 1..100) throw ApiException("Use a positive page and a page size from 1 to 100.", "invalid_pagination")
         return "page=$page&page_size=$pageSize"
+    }
+
+    private fun puzzleFilter(result: String?): String {
+        if (result != null && result != "missed") throw ApiException("result must be missed or omitted.", "invalid_request")
+        return if (result == "missed") "&result=missed" else ""
     }
 
     companion object {

@@ -43,6 +43,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param isPlayer False when a review account reads another player's game.
  * @param humanColor
  * @param plies
+ * @param fen The position after the last move: a finished game's final position.
+ * @param lastMove The last move in UCI, or empty before the first move.
  * @param result 1-0, 0-1, 1/2-1/2 or * while in play.
  * @param finished
  * @param termination
@@ -78,6 +80,14 @@ data class GymGameSummary (
 
     @SerialName(value = "plies")
     val plies: kotlin.Long,
+
+    /* The position after the last move: a finished game's final position. */
+    @SerialName(value = "fen")
+    val fen: kotlin.String,
+
+    /* The last move in UCI, or empty before the first move. */
+    @SerialName(value = "last_move")
+    val lastMove: kotlin.String,
 
     /* 1-0, 0-1, 1/2-1/2 or * while in play. */
     @SerialName(value = "result")

@@ -25,6 +25,7 @@ package com.classicchess.api
 
 import com.classicchess.api.PlayerOpeningExplorerCandidatesItem
 import com.classicchess.api.PlayerOpeningExplorerResultsItem
+import com.classicchess.api.PlayerOpeningExplorerYearFilter
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
@@ -43,6 +44,7 @@ import kotlinx.serialization.encoding.Encoder
  * @param candidates
  * @param count
  * @param playerQuery
+ * @param yearFilter
  * @param hasNext Present with results.
  * @param hasPrevious Present with results.
  * @param page Present with results.
@@ -69,6 +71,9 @@ data class PlayerOpeningExplorer (
 
     @SerialName(value = "player_query")
     val playerQuery: kotlin.String,
+
+    @SerialName(value = "year_filter")
+    val yearFilter: PlayerOpeningExplorerYearFilter,
 
     /* Present with results. */
     @SerialName(value = "has_next")
