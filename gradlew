@@ -208,6 +208,15 @@ DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
 #   * For example: A user cannot expect ${Hostname} to be expanded, as it is an environment variable and will be
 #     treated as '${Hostname}' itself on the command line.
 
+# Keep default output volumes mounted even when callers select another cache.
+# Exported SDKs and native invocations have no monorepo managed init dependency.
+if [ "${ANDROMEDA_TASK_CONTAINER:-}" = 1 ] &&
+   [ -n "${ANDROMEDA_REPOSITORY:-}" ] &&
+   [ "$APP_HOME" = "$ANDROMEDA_REPOSITORY/sdks/kotlin" ] &&
+   [ -f "$ANDROMEDA_REPOSITORY/tools/shared/managed-gradle-outputs.gradle" ]; then
+    set -- --init-script "$ANDROMEDA_REPOSITORY/tools/shared/managed-gradle-outputs.gradle" "$@"
+fi
+
 set -- \
         "-Dorg.gradle.appname=$APP_BASE_NAME" \
         -jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" \

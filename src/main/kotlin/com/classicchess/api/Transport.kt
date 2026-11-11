@@ -4,7 +4,6 @@ import java.io.Closeable
 import java.io.File
 import java.io.IOException
 import java.io.InterruptedIOException
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -59,9 +58,16 @@ internal fun segment(value: String): String {
     return value
 }
 
-/** The username of the account that imported a game, from its page address; safe in a URL path. */
+private val importerUsername = Regex("""[\p{L}\p{N}_.@+-]{1,150}""")
+
+/**
+ * The username of the account that imported a game, from its page address; one URL path segment.
+ * The server accepts up to 150 letters and numbers in any script plus _ . @ + - (Django's Unicode
+ * username rule), so names such as José or 棋手 are valid. OkHttp percent-encodes the non-ASCII
+ * characters as UTF-8 when it resolves the request URL.
+ */
 internal fun usernameSegment(value: String): String {
-    if (!Regex("[A-Za-z0-9@.+_-]{1,150}").matches(value) || value == "." || value == "..") {
+    if (!importerUsername.matches(value) || value == "." || value == "..") {
         throw ApiException("Use the exact username from the game page address.", "invalid_identifier")
     }
     return value
@@ -255,11 +261,18 @@ internal class Transport(private val options: ClientOptions) : Closeable {
             }).apply { maxRequestsPerHost = 10 })
             .build()
 
-        /** OkHttp requires one [Cache] per directory, so clients given the same directory share it. */
-        private val caches = ConcurrentHashMap<String, Cache>()
+        /**
+         * OkHttp requires one [Cache] per directory, so clients given the same directory share it.
+         * A lock around a plain map keeps this to calls Android API 23 has: the native app supports
+         * API 23 without core library desugaring, and `ConcurrentHashMap.computeIfAbsent` with its
+         * `java.util.function.Function` argument only exists from API 24.
+         */
+        private val caches = HashMap<String, Cache>()
 
-        fun sharedCache(directory: File, maxBytes: Long): Cache =
-            caches.computeIfAbsent(directory.absoluteFile.normalize().path) { Cache(File(it), maxBytes) }
+        fun sharedCache(directory: File, maxBytes: Long): Cache {
+            val path = directory.absoluteFile.normalize().path
+            return synchronized(caches) { caches.getOrPut(path) { Cache(File(path), maxBytes) } }
+        }
     }
 }
 

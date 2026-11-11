@@ -22,7 +22,7 @@ plugins {
 }
 
 group = "com.classicchess"
-version = "0.1.2"
+version = "0.1.3"
 repositories { mavenCentral() }
 
 // Built with the current Kotlin compiler but published for Kotlin 2.1: the

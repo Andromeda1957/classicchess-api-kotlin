@@ -74,4 +74,44 @@ class SharedContractTest {
         assertFailsWith<CancellationException> { pending.await() }
         assertEquals(2, server.requestCount)
     }
+
+    private val usernames get() = fixtures.getValue("imported_game_usernames").jsonObject
+    private fun usernameStrings(key: String) = usernames.getValue(key).jsonArray.map { it.jsonPrimitive.content }
+
+    /** The request paths of the three public imported-game reads for one username. */
+    private suspend fun importedGamePaths(username: String): List<String?> {
+        server.enqueue(MockResponse().setBody(SiteGapFixtures.PUBLIC_IMPORTED_GAME))
+        api.publicImportedGame(username, "g1")
+        server.enqueue(MockResponse().setBody("1. e4 *"))
+        api.publicImportedPgn(username, "g1")
+        server.enqueue(MockResponse().setBody("GIF89a").setHeader("Content-Type", "image/gif"))
+        ApplicationClient(ClientOptions(baseUrl = server.url("/").toString())).use { it.publicImportedGameGif(username, "g1", "t") }
+        return List(3) { server.takeRequest(2, TimeUnit.SECONDS)?.path }
+    }
+
+    @Test fun importedGameUsernamesInAnyScriptReachTheirRoutes() = runBlocking<Unit> {
+        for (case in usernames.getValue("accepted").jsonArray.map { it.jsonObject }) {
+            val game = "/api/v1/public/imported-games/" + case.getValue("path_segment").jsonPrimitive.content + "/g1/"
+            assertEquals(listOf(game, game + "pgn/", game + "gif/"), importedGamePaths(case.getValue("username").jsonPrimitive.content))
+        }
+        val longest = usernames.getValue("max_length").jsonPrimitive.int
+        for (character in usernameStrings("length_characters")) {
+            assertTrue(importedGamePaths(character.repeat(longest)).all { it != null }, character)
+        }
+    }
+
+    @Test fun otherNamesFailBeforeAnyRequest() = runBlocking<Unit> {
+        val longest = usernames.getValue("max_length").jsonPrimitive.int
+        val names = usernames.getValue("rejected").jsonArray.map { it.jsonObject.getValue("username").jsonPrimitive.content } +
+            usernameStrings("length_characters").map { it.repeat(longest + 1) }
+        ApplicationClient(ClientOptions(baseUrl = server.url("/").toString())).use { application ->
+            for (username in names) {
+                for (call in listOf<suspend () -> Unit>({ api.publicImportedGame(username, "g1") },
+                    { api.publicImportedPgn(username, "g1") }, { application.publicImportedGameGif(username, "g1", "t") })) {
+                    assertEquals("invalid_identifier", assertFailsWith<ApiException>(username) { call() }.code)
+                }
+            }
+        }
+        assertEquals(0, server.requestCount)
+    }
 }
