@@ -15,6 +15,7 @@ class SiteGapsTest {
     private lateinit var client: ApplicationClient
     private val notebook = "0f8fad5b-d9cb-469f-a165-70867728950e"
     private val gif = byteArrayOf(71, 73, 70, 56, 57, 97, 0, -1)
+    private val fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
 
     @BeforeTest fun start() {
         server = MockWebServer(); server.start()
@@ -117,6 +118,94 @@ class SiteGapsTest {
         assertEquals(Json.parseToJsonElement("{ \"password\": \"secret\" }"), Json.parseToJsonElement(request.body.readUtf8()))
     }
 
+    @Test fun notebookEditingCallsUseExactMethodsPathsAndBodies() = runBlocking {
+        val n = "/api/v1/account/notebooks/$notebook/"
+        val cases = listOf<Triple<suspend () -> ApplicationResponse, String, Pair<String, String?>>>(
+            Triple(suspend { client.accountCreateNotebook("Najdorf", "t", "Main lines", "unlisted", "6.Bg5", fen) }, "POST",
+                "/api/v1/account/notebooks/" to """{"title": "Najdorf", "description": "Main lines", "visibility": "unlisted",
+                    "chapter_title": "6.Bg5", "initial_position": "$fen"}"""),
+            Triple(suspend { client.accountCreateNotebook("From a game", "t", game = "tal-vs-larsen") }, "POST",
+                "/api/v1/account/notebooks/" to """{"title": "From a game", "game": "tal-vs-larsen"}"""),
+            Triple(suspend { client.accountRenameNotebook(notebook.uppercase(), "Najdorf 2", "t") }, "PATCH",
+                n to """{"title": "Najdorf 2"}"""),
+            Triple(suspend { client.accountDeleteNotebook(notebook, "t") }, "DELETE", n to null),
+            Triple(suspend { client.accountNotebookSettings(notebook, "t") }, "GET", "${n}settings/" to null),
+            Triple(suspend { client.accountUpdateNotebookSettings(notebook, "t", visibility = "public", allowPublicExports = false) },
+                "PATCH", "${n}settings/" to """{"visibility": "public", "allow_public_exports": false}"""),
+            Triple(suspend { client.accountSetNotebookCollaborator(notebook, "ann.lee", "editor", "t", canPresentLive = true) },
+                "POST", "${n}collaborators/" to """{"username": "ann.lee", "role": "editor", "can_present_live": true}"""),
+            Triple(suspend { client.accountRemoveNotebookCollaborator(notebook, 4, "t") }, "DELETE", "${n}collaborators/4/" to null),
+            Triple(suspend { client.accountLeaveNotebook(notebook, "t") }, "DELETE", "${n}membership/" to null),
+            Triple(suspend { client.accountNotebookShare(notebook, "t") }, "GET", "${n}share/" to null),
+            Triple(suspend { client.accountCreateNotebookShare(notebook, "t") }, "PUT", "${n}share/" to ""),
+            Triple(suspend { client.accountRevokeNotebookShare(notebook, "t") }, "DELETE", "${n}share/" to null),
+            Triple(suspend { client.accountCreateNotebookSection(notebook, "Sicilian", "t", parentId = 3) }, "POST",
+                "${n}sections/" to """{"title": "Sicilian", "parent_id": 3}"""),
+            Triple(suspend { client.accountRenameNotebookSection(notebook, 3, "Open Sicilian", "t") }, "PATCH",
+                "${n}sections/3/" to """{"title": "Open Sicilian"}"""),
+            Triple(suspend { client.accountDeleteNotebookSection(notebook, 3, "t") }, "DELETE", "${n}sections/3/" to null),
+            Triple(suspend { client.accountMoveNotebookSection(notebook, 3, "t", parentId = 2, beforeSectionId = 8) }, "POST",
+                "${n}sections/3/move/" to """{"parent_id": 2, "before_section_id": 8}"""),
+            Triple(suspend { client.accountMoveNotebookSection(notebook, 3, "t") }, "POST", "${n}sections/3/move/" to "{}"),
+            Triple(suspend { client.accountCreateNotebookChapter(notebook, "t", "Poisoned Pawn", sectionId = 3) }, "POST",
+                "${n}chapters/" to """{"title": "Poisoned Pawn", "section_id": 3}"""),
+            Triple(suspend { client.accountNotebookChapter(notebook, 9, "t") }, "GET", "${n}chapters/9/" to null),
+            Triple(suspend { client.accountSaveNotebookChapter(notebook, 9, "1. e4 c5 *", 4, "t", "Sicilian") }, "PUT",
+                "${n}chapters/9/" to """{"pgn": "1. e4 c5 *", "content_version": 4, "title": "Sicilian"}"""),
+            Triple(suspend { client.accountRenameNotebookChapter(notebook, 9, "Najdorf", "t") }, "PATCH",
+                "${n}chapters/9/" to """{"title": "Najdorf"}"""),
+            Triple(suspend { client.accountDeleteNotebookChapter(notebook, 9, "t") }, "DELETE", "${n}chapters/9/" to null),
+            Triple(suspend { client.accountMoveNotebookChapter(notebook, 9, "t", sectionId = 3, beforeChapterId = 11) }, "POST",
+                "${n}chapters/9/move/" to """{"section_id": 3, "before_chapter_id": 11}"""),
+            Triple(suspend { client.accountNotebookChapterShare(notebook, 9, "t") }, "GET", "${n}chapters/9/share/" to null),
+            Triple(suspend { client.accountCreateNotebookChapterShare(notebook, 9, "t") }, "PUT", "${n}chapters/9/share/" to ""),
+            Triple(suspend { client.accountRevokeNotebookChapterShare(notebook, 9, "t") }, "DELETE", "${n}chapters/9/share/" to null),
+        )
+        for ((call, method, expected) in cases) {
+            server.enqueue(MockResponse().setBody("{ \"ok\": true }"))
+            assertTrue(call().ok)
+            val request = sent()
+            assertEquals(method, request.method)
+            assertEquals(expected.first, request.path)
+            assertEquals("Bearer t", request.getHeader("Authorization"))
+            val body = request.body.readUtf8()
+            when (val json = expected.second) {
+                null, "" -> assertEquals("", body)
+                else -> assertEquals(Json.parseToJsonElement(json), Json.parseToJsonElement(body))
+            }
+        }
+    }
+
+    @Test fun aStaleChapterSaveReportsChapterConflict() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(409)
+            .setBody("{ \"error\": { \"code\": \"chapter_conflict\", \"message\": \"The chapter changed.\" } }"))
+        val stale = client.accountSaveNotebookChapter(notebook, 9, "1. e4 *", 3, "t")
+        assertEquals(409, stale.status)
+        assertEquals("chapter_conflict", stale.errorCode)
+        assertEquals("PUT", sent().method)
+        server.enqueue(MockResponse().setBody("{ \"id\": 9, \"content_version\": 4 }"))
+        assertNull(client.accountSaveNotebookChapter(notebook, 9, "1. e4 *", 3, "t").errorCode)
+        sent()
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test fun notebookEditingRejectsInvalidArgumentsBeforeSending() = runBlocking {
+        val invalid = listOf<suspend () -> Unit>(
+            { client.accountCreateNotebook(" ", "t") }, { client.accountCreateNotebook("N", "t", visibility = "secret") },
+            { client.accountCreateNotebook("N", "t", initialPosition = fen, game = "tal-vs-larsen") },
+            { client.accountRenameNotebook("not-a-uuid", "N", "t") }, { client.accountRenameNotebook(notebook, " ", "t") },
+            { client.accountUpdateNotebookSettings(notebook, "t") },
+            { client.accountSetNotebookCollaborator(notebook, "ann", "owner", "t") },
+            { client.accountRemoveNotebookCollaborator(notebook, 0, "t") },
+            { client.accountMoveNotebookSection(notebook, 3, "t", parentId = 0) },
+            { client.accountCreateNotebookChapter(notebook, "t", initialPosition = fen, game = "tal-vs-larsen") },
+            { client.accountSaveNotebookChapter(notebook, 9, "1. e4 *", 0, "t") },
+            { client.accountMoveNotebookChapter(notebook, 0, "t") },
+        )
+        for (call in invalid) assertFailsWith<ApiException> { call() }
+        assertEquals(0, server.requestCount)
+    }
+
     @Test fun gymCallsUseExactMethodsPathsAndBodies() = runBlocking {
         val game = "/api/v1/account/gym/games/7/"
         val newGame = "/api/v1/account/gym/bots/morphy/games/"
@@ -131,6 +220,8 @@ class SiteGapsTest {
                 newGame to "{ \"color\": \"random\", \"time\": \"3+0\" }"),
             Triple(suspend { client.accountGymNewGame("morphy", "t", time = "custom", minutes = 2, increment = 1) }, "POST",
                 newGame to "{ \"color\": \"white\", \"time\": \"custom\", \"minutes\": 2, \"increment\": 1 }"),
+            Triple(suspend { client.accountGymNewGame("morphy", "t", version = "v4") }, "POST",
+                newGame to "{ \"color\": \"white\", \"time\": \"unlimited\", \"version\": \"v4\" }"),
             Triple(suspend { client.accountGymGame(7, "t") }, "GET", game to null),
             Triple(suspend { client.accountGymDeleteGame(7, "t") }, "DELETE", game to null),
             Triple(suspend { client.accountGymMove(7, "e7e8q", 0, "t") }, "POST",
@@ -185,6 +276,7 @@ class SiteGapsTest {
             { client.accountGymNewGame("morphy", "t", time = "custom", minutes = 0, increment = 0) },
             { client.accountGymNewGame("morphy", "t", time = "custom", minutes = 3) },
             { client.accountGymNewGame("morphy", "t", time = "3+0", minutes = 3) },
+            { client.accountGymNewGame("morphy", "t", version = " ") },
             { client.accountGymGame(0, "t") }, { client.accountGymMove(7, "e2-e4", 0, "t") },
             { client.accountGymMove(7, "e2e4", -1, "t") }, { client.accountGymBotMove(7, -1, "t") },
             { client.accountGymAbort(-3, "t") },

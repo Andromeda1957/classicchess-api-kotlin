@@ -38,7 +38,7 @@ import kotlinx.serialization.encoding.Encoder
  *
  * @param id
  * @param bot
- * @param botName
+ * @param botName The bot alone; bot_version_name adds the version.
  * @param player Username of the account that played the game.
  * @param isPlayer False when a review account reads another player's game.
  * @param humanColor
@@ -53,6 +53,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param timeControl minutes+increment, or empty for an unlimited game.
  * @param createdAt
  * @param urls Follow these links. Paths beginning with / resolve against the API origin.
+ * @param botVersion Key of the bot version the game plays, as in the bot's versions. A game of a retired version reports the default it continues with. Absent when the bot is no longer offered.
+ * @param botVersionName The bot with the version the game plays, for example Romantic Era Bot v4, as the website's games lists show it on hover.
  */
 @Serializable
 
@@ -64,6 +66,7 @@ data class GymGameSummary (
     @SerialName(value = "bot")
     val bot: kotlin.String,
 
+    /* The bot alone; bot_version_name adds the version. */
     @SerialName(value = "bot_name")
     val botName: kotlin.String,
 
@@ -114,7 +117,15 @@ data class GymGameSummary (
 
     /* Follow these links. Paths beginning with / resolve against the API origin. */
     @SerialName(value = "urls")
-    val urls: kotlin.collections.Map<kotlin.String, kotlin.String?>
+    val urls: kotlin.collections.Map<kotlin.String, kotlin.String?>,
+
+    /* Key of the bot version the game plays, as in the bot's versions. A game of a retired version reports the default it continues with. Absent when the bot is no longer offered. */
+    @SerialName(value = "bot_version")
+    val botVersion: kotlin.String? = null,
+
+    /* The bot with the version the game plays, for example Romantic Era Bot v4, as the website's games lists show it on hover. */
+    @SerialName(value = "bot_version_name")
+    val botVersionName: kotlin.String? = null
 
 ) {
 

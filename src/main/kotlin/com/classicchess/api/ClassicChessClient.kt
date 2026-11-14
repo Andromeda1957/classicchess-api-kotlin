@@ -11,7 +11,11 @@ import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 data class PageOptions(val page: Int? = null, val pageSize: Int? = null)
 data class MasterGameFilters(
@@ -19,11 +23,22 @@ data class MasterGameFilters(
     val player: String? = null, val side: String = "either", val result: String = "any",
 )
 data class MasterStatsFilters(val query: String? = null, val player: String? = null, val opponent: String? = null, val mode: String? = null)
+/** [since] and [until] keep games from those years when the source has year indexes. */
 data class ExplorerFilters(val fen: String? = null, val play: String? = null, val moves: Int = 12,
-    val topGames: Int? = null, val sourceType: String? = null, val sourceKey: String? = null)
-/** Lichess Explorer: no player covers the whole Lichess database; a Lichess username covers that player's games. */
+    val topGames: Int? = null, val sourceType: String? = null, val sourceKey: String? = null,
+    val since: Int? = null, val until: Int? = null)
+/**
+ * Lichess Explorer: no player covers the whole Lichess database; a Lichess username covers that player's games.
+ * [since] counts from January of that year and [until] through December of that year.
+ */
 data class LichessExplorerFilters(val fen: String? = null, val player: String? = null,
-    val color: String = "both", val result: String = "all")
+    val color: String = "both", val result: String = "all", val since: Int? = null, val until: Int? = null)
+/**
+ * A MasterDB player's games that reach the position [fen]. [color] is the player's side and [result] the
+ * player's result; a year range leaves out games of unknown year.
+ */
+data class PlayerExplorerFilters(val player: String, val fen: String? = null, val color: String = "both",
+    val result: String = "all", val page: Int? = null, val since: Int? = null, val until: Int? = null)
 private val lichessUsername = Regex("^[A-Za-z0-9_-]{2,30}$")
 data class PublicGameFilters(
     val query: String? = null, val archivePlayer: String? = null, val archiveEvent: String? = null,
@@ -31,7 +46,26 @@ data class PublicGameFilters(
     val page: Int? = null, val pageSize: Int? = null,
     /** Which fields [query] searches: "players" (players, event, site, date), "openings" (opening name, ECO) or "all" (default). */
     val searchMode: String? = null,
+    /** Comma-separated theme slugs from studyThemes(); every one must match. */
+    val theme: String? = null,
+    /** An ECO code or prefix, such as D or D30. */
+    val eco: String? = null,
+    /** "1-0", "0-1", "1/2-1/2" or "*". */
+    val result: String? = null,
+    /** Words searched in published annotation notes; every one must match. */
+    val annotationQ: String? = null,
+    /** Author text in the published annotation source label. */
+    val annotationAuthor: String? = null,
+    /** Book title text in the published annotation source label. */
+    val annotationBook: String? = null,
 )
+/**
+ * An annotated book's game list: [query] searches the published notes, [headerQuery] the game headers
+ * (players, event, site, date, opening, ECO) as the book page's search box does, and [author] the source
+ * label. [sort] "asc" or "desc" orders by game date, undated games last.
+ */
+data class AnnotatedGameFilters(val query: String? = null, val headerQuery: String? = null,
+    val author: String? = null, val sort: String? = null)
 data class GalleryFilters(val query: String? = null, val page: Int? = null, val pageSize: Int? = null)
 data class IterationOptions(val limit: Long? = null, val maxPages: Int = 100_000)
 
@@ -47,12 +81,51 @@ private fun gameQuery(filters: PublicGameFilters): Map<String, Any?> {
     if (filters.searchMode != null && filters.searchMode !in listOf("all", "players", "openings")) {
         throw ApiException("searchMode must be all, players or openings.", "invalid_query")
     }
+    if (filters.result != null && filters.result !in listOf("1-0", "0-1", "1/2-1/2", "*")) {
+        throw ApiException("result must be 1-0, 0-1, 1/2-1/2 or *.", "invalid_query")
+    }
     return pageQuery(PageOptions(filters.page, filters.pageSize)) + mapOf(
         "q" to filters.query, "archive_player" to filters.archivePlayer, "archive_event" to filters.archiveEvent,
         "search_mode" to filters.searchMode,
         "since" to filters.since, "until" to filters.until, "sort" to filters.sort,
+        "theme" to filters.theme, "eco" to filters.eco, "result" to filters.result,
+        "annotation_q" to filters.annotationQ, "annotation_author" to filters.annotationAuthor,
+        "annotation_book" to filters.annotationBook,
     )
 }
+
+private fun annotatedGameQuery(page: PageOptions, filters: AnnotatedGameFilters): Map<String, Any?> {
+    if (filters.sort != null && filters.sort !in listOf("asc", "desc")) throw ApiException("sort must be asc or desc.", "invalid_query")
+    return pageQuery(page) + mapOf("q" to filters.query, "header_q" to filters.headerQuery,
+        "author" to filters.author, "sort" to filters.sort)
+}
+
+private fun playerExplorerQuery(filters: PlayerExplorerFilters): Map<String, Any?> {
+    val player = filters.player.trim()
+    if (player.isEmpty() || player.length > 80 || (filters.fen?.length ?: 0) > 100) {
+        throw ApiException("Use a player of 1 to 80 characters and a FEN of at most 100.", "invalid_query")
+    }
+    if (filters.color !in listOf("both", "white", "black") || filters.result !in listOf("all", "win", "loss", "draw")) {
+        throw ApiException("color must be both, white or black; result must be all, win, loss or draw.", "invalid_query")
+    }
+    if (filters.page != null && filters.page < 1) throw ApiException("page must be positive.", "invalid_pagination")
+    return mapOf("player" to player, "fen" to filters.fen, "color" to filters.color, "result" to filters.result,
+        "page" to filters.page, "since" to filters.since, "until" to filters.until)
+}
+
+/** At most 300 export tokens, one per line: the body form keeps long batches out of the URL. */
+private fun tokenBody(tokens: List<String>, check: (String) -> String): String {
+    if (tokens.size !in 1..300) throw ApiException("Export between 1 and 300 tokens.", "invalid_export")
+    return tokens.joinToString("\n") { check(it) }
+}
+
+private fun exportFormat(format: String, pgnInJson: Boolean): Map<String, Any?> =
+    mapOf("format" to format, "pgnInJson" to if (format == "ndjson") pgnInJson else null)
+
+private val gymShareToken = Regex("[0-9]+\\.[A-Za-z0-9_-]{1,255}")
+private val lichessGameId = Regex("[A-Za-z0-9]{8}")
+private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+private val TEXT_MEDIA = "text/plain; charset=utf-8".toMediaType()
 
 private fun masterQuery(filters: MasterGameFilters): Map<String, Any?> {
     val query = filters.query
@@ -106,8 +179,30 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
     }
     suspend fun explorer(filters: ExplorerFilters = ExplorerFilters()): JsonObject =
         read("/api/v1/opening-explorer/", JsonObject.serializer(), mapOf("fen" to filters.fen, "play" to filters.play,
-            "moves" to filters.moves, "topGames" to filters.topGames, "source_type" to filters.sourceType, "source_key" to filters.sourceKey))
+            "moves" to filters.moves, "topGames" to filters.topGames, "source_type" to filters.sourceType, "source_key" to filters.sourceKey,
+            "since" to filters.since, "until" to filters.until))
     suspend fun explorerSources(): JsonObject = read("/api/v1/opening-explorer/sources/", JsonObject.serializer())
+    /**
+     * A MasterDB player's games at a position, one page at a time. An ambiguous or unknown player returns
+     * `candidates` and no `results`. While the player's position index is first built the reply is
+     * `{"pending": true, "retry_after_ms": ...}`: ask again after that delay.
+     */
+    suspend fun playerExplorer(filters: PlayerExplorerFilters): JsonObject =
+        read("/api/v1/opening-explorer/player/", JsonObject.serializer(), playerExplorerQuery(filters))
+    /** One public Lichess game by its eight-character ID, as `title` and validated `pgn`; nothing is imported. */
+    suspend fun lichessExplorerGame(gameId: String): JsonObject {
+        if (!lichessGameId.matches(gameId)) throw ApiException("Use an eight-character Lichess game ID.", "invalid_identifier")
+        return read("/api/v1/opening-explorer/lichess/games/$gameId/", JsonObject.serializer())
+    }
+    /**
+     * The PGN of one public Lichess or Chess.com game from its link, as the Analysis Board loads it; nothing is
+     * saved. `orientation` is the side a Lichess /white or /black link names, otherwise null.
+     */
+    suspend fun resolveGameLink(url: String): ResolvedGameLink {
+        if (url.isBlank() || url.length > 500) throw ApiException("Use a game link of at most 500 characters.", "invalid_query")
+        val body = buildJsonObject { put("url", url) }.toString().toRequestBody(JSON_MEDIA)
+        return parse(transport.post(transport.url("/api/v1/analysis/game-link/"), body, "application/json"), ResolvedGameLink.serializer())
+    }
     /** Explore a position in the Lichess database; Classic Chess relays it with its own Lichess credential. */
     suspend fun lichessExplorer(filters: LichessExplorerFilters = LichessExplorerFilters()): JsonObject {
         val player = filters.player.orEmpty().trim()
@@ -120,7 +215,8 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
         val fen = filters.fen?.takeIf { it.isNotEmpty() }
         val query = if (player.isEmpty()) mapOf("fen" to fen)
             else mapOf("fen" to fen, "player" to player, "color" to filters.color, "result" to filters.result)
-        return read("/api/v1/opening-explorer/lichess/", JsonObject.serializer(), query)
+        return read("/api/v1/opening-explorer/lichess/", JsonObject.serializer(),
+            query + mapOf("since" to filters.since, "until" to filters.until))
     }
     suspend fun exportMasterGames(query: String? = null, tokens: List<String>? = null,
         format: String = "pgn", pgnInJson: Boolean = true): String {
@@ -131,6 +227,10 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
             "tokens" to tokens?.joinToString(",") { masterToken(it) }, "format" to format,
             "pgnInJson" to if (format == "ndjson") pgnInJson else null))
     }
+    /** Export 1 to 300 MasterDB game tokens sent in the request body rather than the URL. */
+    suspend fun exportMasterGamesByToken(tokens: List<String>, format: String = "pgn", pgnInJson: Boolean = true): String =
+        transport.post(transport.url("/api/v1/games/export/", exportFormat(format, pgnInJson)),
+            tokenBody(tokens, ::masterToken).toRequestBody(TEXT_MEDIA), "application/x-chess-pgn")
     suspend fun masterGames(filters: MasterGameFilters): MasterGamePage =
         read("/api/v1/games/", MasterGamePage.serializer(), masterQuery(filters))
     suspend fun masterGame(token: String): MasterGameDetail =
@@ -182,6 +282,44 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
     /** Every face of today's homepage card; each of player, game, onThisDay and event is null when absent. */
     suspend fun todaysPicks(): PublicTodaysPicks =
         read("/api/v1/public/todays-picks/", PublicTodaysPicks.serializer())
+    /** Today's sourced chess-history anniversaries in the site's timezone, in featured order. */
+    suspend fun chessToday(): ChessTodayDay = read("/api/v1/public/chess-today/", ChessTodayDay.serializer())
+    /** The chess-history anniversaries of one calendar day. */
+    suspend fun chessTodayOnDate(month: Int, day: Int): ChessTodayDay {
+        if (month !in 1..12 || day !in 1..31) throw ApiException("Use a month from 1 to 12 and a day from 1 to 31.", "invalid_query")
+        return read("/api/v1/public/chess-today/$month/$day/", ChessTodayDay.serializer())
+    }
+    /** The study theme taxonomy: each theme's rule, measured precision and game count. Use slugs as PublicGameFilters.theme. */
+    suspend fun studyThemes(): JsonObject = read("/api/v1/public/themes/", JsonObject.serializer())
+    /** One page of What's New posts, newest first; a page past the last is a 404. */
+    suspend fun siteUpdates(page: PageOptions = PageOptions()): SiteUpdatePage =
+        read("/api/v1/public/site-updates/", SiteUpdatePage.serializer(), pageQuery(page))
+    suspend fun siteUpdate(updateId: String): SiteUpdateDetail =
+        read("/api/v1/public/site-updates/${segment(updateId)}/", SiteUpdateDetail.serializer())
+    /** Every What's New post, newest first, page by page until the last. */
+    fun iterateSiteUpdates(pageSize: Int? = null, options: IterationOptions = IterationOptions()): Flow<SiteUpdatePost> = flow {
+        if (options.maxPages < 1 || options.limit != null && options.limit < 0) throw ApiException("Use positive maxPages and a nonnegative limit.", "invalid_pagination")
+        var page = 1
+        var count = 0L
+        while (options.limit == null || count < options.limit) {
+            currentCoroutineContext().ensureActive()
+            if (page > options.maxPages) throw ApiException("Pagination exceeded maxPages.", "invalid_pagination")
+            val result = siteUpdates(PageOptions(page, pageSize))
+            if (result.page != page.toLong()) throw ApiException("Pagination repeated a page.", "invalid_pagination")
+            for (post in result.results) {
+                emit(post)
+                count++
+                if (options.limit != null && count >= options.limit) return@flow
+            }
+            if (!result.hasNext) return@flow
+            page++
+        }
+    }
+    /** A Gym game by the signed token in its share link (urls.api_share), as the link shows it to anyone. */
+    suspend fun sharedGymGame(token: String): GymSharedGame {
+        if (!gymShareToken.matches(token)) throw ApiException("Use the token from a Gym game's share link.", "invalid_identifier")
+        return read("/api/v1/public/gym/games/$token/", GymSharedGame.serializer())
+    }
     /** The site search box's grouped preview of players, events and games. */
     suspend fun siteSearch(query: String): SiteSearchPreview =
         read("/api/v1/public/search/", SiteSearchPreview.serializer(), mapOf("q" to siteSearchQuery(query)))
@@ -192,6 +330,15 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
         return read("/api/v1/public/search/", SiteSearchPage.serializer(),
             mapOf("q" to siteSearchQuery(query), "kind" to kind, "page" to page))
     }
+    /**
+     * One 20-row page of the site's own content: its pages and their sections, player biographies, event
+     * histories and What's New posts, best match first, each with a quoted snippet and the matched ranges.
+     */
+    suspend fun siteContentSearch(query: String, page: Int = 1): SiteContentSearchPage {
+        if (page < 1) throw ApiException("page must be positive.", "invalid_pagination")
+        return read("/api/v1/public/search/", SiteContentSearchPage.serializer(),
+            mapOf("q" to siteSearchQuery(query), "kind" to "site", "page" to page))
+    }
     suspend fun tablebase(fen: String): TablebaseProbe {
         if (fen.isBlank() || fen.toByteArray(Charsets.UTF_8).size > 200) throw ApiException("Use a FEN of at most 200 bytes.", "invalid_query")
         return read("/api/v1/tablebase/", TablebaseProbe.serializer(), mapOf("fen" to fen))
@@ -201,7 +348,13 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
     suspend fun bookTitles(ccnbFormat: Int? = null): List<String> = annotatedBooks(ccnbFormat).results.map { it.label }
     /** Exact package bytes; use the same ccnbFormat as annotatedBooks for matching revisions. */
     suspend fun annotatedNotebookFile(bookSlug: String, ccnbFormat: Int? = null): ByteArray =
-        transport.ccnbDownload(bookSlug, ccnbFormat)
+        transport.ccnbDownload("/annotated/${segment(bookSlug)}/download/", ccnbFormat)
+    /**
+     * The book as a .ccnb Notebook package from the versioned API (`urls.ccnb`): every annotated game with its
+     * notes, the mapped source pages and rights metadata. ccnbFormat 3 selects the binary container; omitted is 2.
+     */
+    suspend fun annotatedBookCcnb(bookSlug: String, ccnbFormat: Int? = null): ByteArray =
+        transport.ccnbDownload("/api/v1/annotated/books/${segment(bookSlug)}/ccnb/", ccnbFormat)
     suspend fun publicGames(filters: PublicGameFilters = PublicGameFilters()): PublicGamePage =
         read("/api/v1/public/games/", PublicGamePage.serializer(), gameQuery(filters))
     suspend fun publicGame(token: String): PublicGame =
@@ -223,8 +376,13 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
             + mapOf("tokens" to tokens?.joinToString(",") { gameToken(it) }, "format" to format,
                 "pgnInJson" to if (format == "ndjson") pgnInJson else null))
     }
-    suspend fun annotatedGames(bookSlug: String, page: PageOptions = PageOptions()): AnnotatedGamePage =
-        read("/api/v1/annotated/books/${segment(bookSlug)}/games/", AnnotatedGamePage.serializer(), pageQuery(page))
+    /** Export 1 to 300 public game tokens sent in the request body rather than the URL. */
+    suspend fun exportPublicGamesByToken(tokens: List<String>, format: String = "pgn", pgnInJson: Boolean = true): String =
+        transport.post(transport.url("/api/v1/public/games/export/", exportFormat(format, pgnInJson)),
+            tokenBody(tokens, ::gameToken).toRequestBody(TEXT_MEDIA), "application/x-chess-pgn")
+    suspend fun annotatedGames(bookSlug: String, page: PageOptions = PageOptions(),
+        filters: AnnotatedGameFilters = AnnotatedGameFilters()): AnnotatedGamePage =
+        read("/api/v1/annotated/books/${segment(bookSlug)}/games/", AnnotatedGamePage.serializer(), annotatedGameQuery(page, filters))
     suspend fun annotatedGame(bookSlug: String, gameSlug: String): AnnotatedGame =
         read("/api/v1/annotated/books/${segment(bookSlug)}/games/${segment(gameSlug)}/", AnnotatedGame.serializer())
     suspend fun annotatedPgn(bookSlug: String, gameSlug: String? = null): String {
@@ -236,8 +394,9 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
             val page = decode(url, PublicGamePage.serializer())
             Page(page.results, page.next)
         }
-    fun iterateAnnotatedGames(bookSlug: String, page: PageOptions = PageOptions(), options: IterationOptions = IterationOptions()): Flow<AnnotatedGame> =
-        iterate(transport.url("/api/v1/annotated/books/${segment(bookSlug)}/games/", pageQuery(page)), options) { url ->
+    fun iterateAnnotatedGames(bookSlug: String, page: PageOptions = PageOptions(), options: IterationOptions = IterationOptions(),
+        filters: AnnotatedGameFilters = AnnotatedGameFilters()): Flow<AnnotatedGame> =
+        iterate(transport.url("/api/v1/annotated/books/${segment(bookSlug)}/games/", annotatedGameQuery(page, filters)), options) { url ->
             val result = decode(url, AnnotatedGamePage.serializer())
             Page(result.results, result.next)
         }
@@ -251,12 +410,11 @@ class ClassicChessClient(options: ClientOptions = ClientOptions()) : Closeable {
 
     private suspend fun <T> read(path: String, serializer: DeserializationStrategy<T>, params: Map<String, Any?> = emptyMap()): T =
         decode(transport.url(path, params), serializer)
-    private suspend fun <T> decode(url: HttpUrl, serializer: DeserializationStrategy<T>, ccnbFormat: Int? = null): T {
-        val text = transport.read(url, "application/json", ccnbFormat)
-        return withContext(Dispatchers.Default) {
-            try { json.decodeFromString(serializer, text) }
-            catch (error: SerializationException) { throw ApiException("Response does not match the API schema.", "invalid_response", cause = error) }
-        }
+    private suspend fun <T> decode(url: HttpUrl, serializer: DeserializationStrategy<T>, ccnbFormat: Int? = null): T =
+        parse(transport.read(url, "application/json", ccnbFormat), serializer)
+    private suspend fun <T> parse(text: String, serializer: DeserializationStrategy<T>): T = withContext(Dispatchers.Default) {
+        try { json.decodeFromString(serializer, text) }
+        catch (error: SerializationException) { throw ApiException("Response does not match the API schema.", "invalid_response", cause = error) }
     }
     private suspend fun pgn(path: String, params: Map<String, Any?> = emptyMap()): String =
         transport.read(transport.url(path, params), "application/x-chess-pgn")

@@ -47,6 +47,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param next
  * @param previous
  * @param results
+ * @param headerQ The header search applied, empty when none. Older servers ignore header_q and omit this echo, so a client that sends header_q and gets no echo has unfiltered results.
+ * @param sort The order applied. Older servers ignore sort, answer in asc order and omit this echo.
  */
 @Serializable
 
@@ -77,9 +79,42 @@ data class AnnotatedGamePage (
     val previous: kotlin.String?,
 
     @SerialName(value = "results")
-    val results: kotlin.collections.List<AnnotatedGame>
+    val results: kotlin.collections.List<AnnotatedGame>,
+
+    /* The header search applied, empty when none. Older servers ignore header_q and omit this echo, so a client that sends header_q and gets no echo has unfiltered results. */
+    @SerialName(value = "header_q")
+    val headerQ: kotlin.String? = null,
+
+    /* The order applied. Older servers ignore sort, answer in asc order and omit this echo. */
+    @SerialName(value = "sort")
+    val sort: AnnotatedGamePage.Sort? = null
 
 ) {
 
+    /**
+     * The order applied. Older servers ignore sort, answer in asc order and omit this echo.
+     *
+     * Values: ASC,DESC,UNKNOWN_DEFAULT_OPEN_API
+     */
+    @Serializable(with = SortSerializer::class)
+    enum class Sort(val value: kotlin.String) {
+        @SerialName(value = "asc") ASC("asc"),
+        @SerialName(value = "desc") DESC("desc"),
+        @SerialName(value = "unknown_default_open_api") UNKNOWN_DEFAULT_OPEN_API("unknown_default_open_api");
+    }
+
+    internal object SortSerializer : KSerializer<Sort> {
+        override val descriptor = kotlin.String.serializer().descriptor
+
+        override fun deserialize(decoder: Decoder): Sort {
+            val value = decoder.decodeSerializableValue(kotlin.String.serializer())
+            return Sort.entries.firstOrNull { it.value == value }
+                ?: Sort.UNKNOWN_DEFAULT_OPEN_API
+        }
+
+        override fun serialize(encoder: Encoder, value: Sort) {
+            encoder.encodeSerializableValue(kotlin.String.serializer(), value.value)
+        }
+    }
 
 }

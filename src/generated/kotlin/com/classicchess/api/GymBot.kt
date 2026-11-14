@@ -23,6 +23,7 @@
 
 package com.classicchess.api
 
+import com.classicchess.api.GymBotVersion
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
@@ -39,6 +40,10 @@ import kotlinx.serialization.encoding.Encoder
  * @param key
  * @param name
  * @param about
+ * @param versions Newest first, as the version menu lists them.
+ * @param defaultVersion The version key a new game plays when it names none.
+ * @param matchUnit What move_match counts, as the card words it, for example OF MORPHY'S MOVES MATCHED.
+ * @param ownGamesUnit What own_games counts, as the card words it, for example MORPHY GAMES.
  */
 @Serializable
 
@@ -51,7 +56,23 @@ data class GymBot (
     val name: kotlin.String,
 
     @SerialName(value = "about")
-    val about: kotlin.String
+    val about: kotlin.String,
+
+    /* Newest first, as the version menu lists them. */
+    @SerialName(value = "versions")
+    val versions: kotlin.collections.List<GymBotVersion>? = null,
+
+    /* The version key a new game plays when it names none. */
+    @SerialName(value = "default_version")
+    val defaultVersion: kotlin.String? = null,
+
+    /* What move_match counts, as the card words it, for example OF MORPHY'S MOVES MATCHED. */
+    @SerialName(value = "match_unit")
+    val matchUnit: kotlin.String? = null,
+
+    /* What own_games counts, as the card words it, for example MORPHY GAMES. */
+    @SerialName(value = "own_games_unit")
+    val ownGamesUnit: kotlin.String? = null
 
 ) {
 

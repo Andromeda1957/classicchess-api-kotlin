@@ -27,6 +27,7 @@ import com.classicchess.api.GamePlayerPortraits
 import com.classicchess.api.Mainline
 import com.classicchess.api.PlayerIdentity
 import com.classicchess.api.PublicGameMembershipsItem
+import com.classicchess.api.PublicGamePrimaryAnnotation
 import com.classicchess.api.PublicGameThemesItem
 
 import kotlinx.serialization.Serializable
@@ -68,6 +69,7 @@ import kotlinx.serialization.encoding.Encoder
  * @param mainline
  * @param memberships
  * @param portraits
+ * @param primaryAnnotation
  */
 @Serializable
 
@@ -159,7 +161,10 @@ data class PublicGame (
     val memberships: kotlin.collections.List<PublicGameMembershipsItem>? = null,
 
     @SerialName(value = "portraits")
-    val portraits: GamePlayerPortraits? = null
+    val portraits: GamePlayerPortraits? = null,
+
+    @SerialName(value = "primary_annotation")
+    val primaryAnnotation: PublicGamePrimaryAnnotation? = null
 
 ) {
 

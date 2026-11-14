@@ -23,12 +23,14 @@
 
 package com.classicchess.api
 
+import com.classicchess.api.AnnotatedGameAllOfSourcePages
 import com.classicchess.api.AnnotatedGameAnnotation
 import com.classicchess.api.AnnotatedGameBook
 import com.classicchess.api.GamePlayerPortraits
 import com.classicchess.api.Mainline
 import com.classicchess.api.PlayerIdentity
 import com.classicchess.api.PublicGameMembershipsItem
+import com.classicchess.api.PublicGamePrimaryAnnotation
 import com.classicchess.api.PublicGameThemesItem
 
 import kotlinx.serialization.Serializable
@@ -72,6 +74,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param mainline
  * @param memberships
  * @param portraits
+ * @param primaryAnnotation
+ * @param sourcePages
  */
 @Serializable
 
@@ -169,7 +173,13 @@ data class AnnotatedGame (
     val memberships: kotlin.collections.List<PublicGameMembershipsItem>? = null,
 
     @SerialName(value = "portraits")
-    val portraits: GamePlayerPortraits? = null
+    val portraits: GamePlayerPortraits? = null,
+
+    @SerialName(value = "primary_annotation")
+    val primaryAnnotation: PublicGamePrimaryAnnotation? = null,
+
+    @SerialName(value = "source_pages")
+    val sourcePages: AnnotatedGameAllOfSourcePages? = null
 
 ) {
 

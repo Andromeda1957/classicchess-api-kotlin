@@ -25,6 +25,8 @@ package com.classicchess.api
 
 import com.classicchess.api.Biography
 import com.classicchess.api.PlayerIdentity
+import com.classicchess.api.PublicPlayerBiographyArchivePicksItem
+import com.classicchess.api.PublicPlayerBiographyBibliography
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
@@ -41,6 +43,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param source
  * @param player
  * @param bio
+ * @param archivePicks The about page's \"From the archive\" game picks, in editorial order; empty without an approved biography. Absent from older servers.
+ * @param bibliography
  */
 @Serializable
 
@@ -53,7 +57,14 @@ data class PublicPlayerBiography (
     val player: PlayerIdentity,
 
     @SerialName(value = "bio")
-    val bio: Biography?
+    val bio: Biography?,
+
+    /* The about page's \"From the archive\" game picks, in editorial order; empty without an approved biography. Absent from older servers. */
+    @SerialName(value = "archive_picks")
+    val archivePicks: kotlin.collections.List<PublicPlayerBiographyArchivePicksItem>? = null,
+
+    @SerialName(value = "bibliography")
+    val bibliography: PublicPlayerBiographyBibliography? = null
 
 ) {
 

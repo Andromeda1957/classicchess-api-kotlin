@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.Request
@@ -19,6 +20,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 data class ApplicationResponse(val status: Int, val data: JsonObject, val retryAfter: String?) {
     val ok: Boolean get() = status in 200..299
+    /** A failed reply's API error code, such as chapter_conflict or capacity_exhausted; null for success. */
+    val errorCode: String? get() = if (ok) null else
+        ((data["error"] as? JsonObject)?.get("code") as? JsonPrimitive)?.takeIf { it.isString }?.content
 }
 
 /** AND criteria within one group; OR between groups. Players/events use curated catalog slugs. */
@@ -123,6 +127,103 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
     suspend fun accountDeleteImportedGame(gameSlug: String, token: String): ApplicationResponse =
         request("/api/v1/account/imported-games/${segment(gameSlug)}/", "DELETE", token = token)
 
+    // The rest of the library. Personal tokens need library:read to read and library:write to change;
+    // device sessions pass both. Decode replies with the generated models, such as AccountCollectionPage.
+    /** One page of an owned collection's games. [query] keeps games whose players, event, date, opening or ECO contain it. */
+    suspend fun accountCollectionGames(collectionId: Long, token: String, page: Int = 1, pageSize: Int = 50,
+        sort: String? = null, query: String? = null): ApplicationResponse {
+        libraryPage(page, pageSize)
+        choice(sort, COLLECTION_SORTS, "sort")
+        return request(withQuery(collection(collectionId), "page" to page, "page_size" to pageSize, "sort" to sort, "q" to query),
+            token = token)
+    }
+    /** Change a collection's name, saved sort, description or plan flag; at least one. */
+    suspend fun accountUpdateCollection(collectionId: Long, token: String, name: String? = null, sort: String? = null,
+        description: String? = null, isPlan: Boolean? = null): ApplicationResponse {
+        choice(sort, COLLECTION_SORTS, "sort")
+        val body = buildJsonObject {
+            name?.let { put("name", it) }; sort?.let { put("sort", it) }
+            description?.let { put("description", it) }; isPlan?.let { put("is_plan", it) }
+        }
+        return request(collection(collectionId), "PATCH", nonEmpty(body), token)
+    }
+    /** Set a collection game's note and/or studied mark; studied true keeps an earlier timestamp. */
+    suspend fun accountUpdateCollectionItem(collectionId: Long, itemId: Long, token: String, note: String? = null,
+        studied: Boolean? = null): ApplicationResponse {
+        val body = buildJsonObject { note?.let { put("note", it) }; studied?.let { put("studied", it) } }
+        return request(collectionItem(collectionId, itemId), "PATCH", nonEmpty(body), token)
+    }
+    /** Remove one collection item by its item ID. */
+    suspend fun accountRemoveCollectionItem(collectionId: Long, itemId: Long, token: String): ApplicationResponse =
+        request(collectionItem(collectionId, itemId), "DELETE", token = token)
+    /** Remove a game by its slug; removing one that is absent returns changed false. */
+    suspend fun accountRemoveCollectionGame(collectionId: Long, gameSlug: String, token: String): ApplicationResponse =
+        request(collection(collectionId) + "games/" + segment(gameSlug) + "/", "DELETE", token = token)
+    /** Every accessible item ID of the collection exactly once, in the new order. */
+    suspend fun accountReorderCollection(collectionId: Long, itemIds: List<Long>, token: String): ApplicationResponse {
+        if (itemIds.size > 10_000) throw ApiException("Reorder at most 10000 items.", "invalid_request")
+        val body = buildJsonObject { put("item_ids", JsonArray(itemIds.map { JsonPrimitive(it) })) }
+        return request(collection(collectionId) + "reorder/", "PUT", body.toString(), token)
+    }
+    /** A collection's notes and study progress, one page at a time. */
+    suspend fun accountPlanProgress(collectionId: Long, token: String, page: Int = 1, pageSize: Int = 50): ApplicationResponse =
+        request(collection(collectionId) + "progress/?" + libraryPage(page, pageSize), token = token)
+    /**
+     * Create a study plan of 1 to 100 games in playback order, all at once or not at all. Retrying with the
+     * same [idempotencyKey] and input returns the existing plan; the same key with other input is 409.
+     */
+    suspend fun accountCreatePlan(name: String, games: List<PlanGame>, idempotencyKey: String, token: String,
+        description: String? = null): ApplicationResponse {
+        if (name.isBlank() || games.size !in 1..100 || idempotencyKey.isEmpty() || idempotencyKey.length > 80) {
+            throw ApiException("Use a plan name, 1 to 100 games and an idempotency key of 1 to 80 characters.", "invalid_request")
+        }
+        val items = games.map { game -> buildJsonObject { put("game", game.game); game.note?.let { put("note", it) } } }
+        return request("/api/v1/account/plans/", "POST", buildJsonObject {
+            put("name", name); description?.let { put("description", it) }
+            put("idempotency_key", idempotencyKey); put("items", JsonArray(items))
+        }.toString(), token)
+    }
+    /** Toggle a player bookmark; `bookmarked` is the new state. Never retry it automatically. */
+    suspend fun accountTogglePlayerBookmark(playerSlug: String, token: String): ApplicationResponse =
+        request("/api/v1/account/players/${segment(playerSlug)}/bookmark/", "POST", token = token)
+    /** Whether you starred a game and which of your collections hold it. */
+    suspend fun accountGameLibrary(gameSlug: String, token: String): ApplicationResponse =
+        request("/api/v1/account/games/${segment(gameSlug)}/library/", token = token)
+    /** Your imported games with the import quota; [source] lichess, chesscom or pgn filters by the PGN Site header. */
+    suspend fun accountImportedGames(token: String, page: Int = 1, pageSize: Int = 50, query: String? = null,
+        source: String? = null, sort: String? = null): ApplicationResponse {
+        libraryPage(page, pageSize)
+        choice(source, IMPORT_SOURCES, "source"); choice(sort, IMPORTED_SORTS, "sort")
+        return request(withQuery("/api/v1/account/imported-games/", "q" to query, "source" to source, "sort" to sort,
+            "page" to page, "page_size" to pageSize), token = token)
+    }
+    /**
+     * Import a game (201): source "pgn" with [pgn] text, or "lichess" or "chesscom" with the game's [remoteUrl].
+     * It is private unless [visibility] is "public". Each call imports another copy.
+     */
+    suspend fun accountImportGame(source: String, token: String, pgn: String? = null, remoteUrl: String? = null,
+        visibility: String? = null): ApplicationResponse {
+        choice(source, IMPORT_SOURCES, "source"); choice(visibility, listOf("private", "public"), "visibility")
+        if (source == "pgn" && (pgn.isNullOrBlank() || remoteUrl != null) || source != "pgn" && (remoteUrl.isNullOrBlank() || pgn != null)) {
+            throw ApiException("A pgn import needs pgn text; a lichess or chesscom import needs remoteUrl.", "invalid_request")
+        }
+        return request("/api/v1/account/imported-games/", "POST", buildJsonObject {
+            put("source", source); pgn?.let { put("pgn", it) }; remoteUrl?.let { put("remote_url", it) }
+            visibility?.let { put("visibility", it) }
+        }.toString(), token)
+    }
+    /** One owned import of either visibility, with its PGN and mainline. */
+    suspend fun accountImportedGame(gameSlug: String, token: String): ApplicationResponse =
+        request("/api/v1/account/imported-games/${segment(gameSlug)}/", token = token)
+
+    // Website preferences: preferences:read to read and preferences:write to change. The Android app's own
+    // sound and speech settings are separate (mobileSettings).
+    /** The website's board, engine, viewer, sound and speech preferences with the choices they offer. */
+    suspend fun accountPreferences(token: String): ApplicationResponse = request("/api/v1/account/preferences/", token = token)
+    /** Change only the preferences [changes] sets; when any value is refused, nothing changes. Safe to retry. */
+    suspend fun accountUpdatePreferences(changes: PreferenceChanges, token: String): ApplicationResponse =
+        request("/api/v1/account/preferences/", "PATCH", nonEmpty(changes.toJson()), token)
+
     // GIF exports need a registered account: any personal token, or a device session.
     suspend fun masterGameGif(game: String, token: String, orientation: String = "white"): ApplicationDownload =
         gif("/api/v1/games/" + segment(game) + "/gif/", token, orientation)
@@ -180,6 +281,137 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
         return download(path, token, "POST", buildJsonObject { put("password", password) }.toString(), accept, ccnbFormat)
     }
 
+    // Notebook editing, as the website's Notebook pages edit. Personal tokens need notebooks:read to read a
+    // chapter, notebooks:write to create or rename a Notebook and to create, rename, save, move and delete its
+    // folders and chapters, and notebooks:manage for settings, collaborators, share links, leaving and deleting
+    // a Notebook. Device sessions pass all three. The account's role in the Notebook still decides what it may do.
+    /**
+     * Create a Notebook you own with one chapter (201). The chapter starts from [initialPosition] (a FEN or one
+     * PGN game) or from a [game] slug you can open, not both; otherwise from the standard position. Each call
+     * creates another Notebook.
+     */
+    suspend fun accountCreateNotebook(title: String, token: String, description: String? = null, visibility: String? = null,
+        chapterTitle: String? = null, initialPosition: String? = null, game: String? = null): ApplicationResponse {
+        choice(visibility, NOTEBOOK_VISIBILITIES, "visibility")
+        if (title.isBlank() || initialPosition != null && game != null) {
+            throw ApiException("Use a title and at most one of initialPosition and game.", "invalid_request")
+        }
+        return request("/api/v1/account/notebooks/", "POST", buildJsonObject {
+            put("title", title); description?.let { put("description", it) }; visibility?.let { put("visibility", it) }
+            chapterTitle?.let { put("chapter_title", it) }; initialPosition?.let { put("initial_position", it) }
+            game?.let { put("game", it) }
+        }.toString(), token)
+    }
+    suspend fun accountRenameNotebook(notebook: String, title: String, token: String): ApplicationResponse =
+        request(notebookPath(notebook), "PATCH", titleBody(title), token)
+    /** Delete a Notebook you own, with all its folders and chapters. */
+    suspend fun accountDeleteNotebook(notebook: String, token: String): ApplicationResponse =
+        request(notebookPath(notebook), "DELETE", token = token)
+    /** What the website settings page shows: title, description, visibility, export permission, owner and collaborators. */
+    suspend fun accountNotebookSettings(notebook: String, token: String): ApplicationResponse =
+        request(notebookPath(notebook) + "settings/", token = token)
+    /** Change at least one setting; the rest keep their current values. */
+    suspend fun accountUpdateNotebookSettings(notebook: String, token: String, title: String? = null, description: String? = null,
+        visibility: String? = null, allowPublicExports: Boolean? = null): ApplicationResponse {
+        choice(visibility, NOTEBOOK_VISIBILITIES, "visibility")
+        val body = buildJsonObject {
+            title?.let { put("title", it) }; description?.let { put("description", it) }
+            visibility?.let { put("visibility", it) }; allowPublicExports?.let { put("allow_public_exports", it) }
+        }
+        return request(notebookPath(notebook) + "settings/", "PATCH", nonEmpty(body), token)
+    }
+    /**
+     * Invite a public account as viewer, commenter, editor or manager, or change an existing collaborator's role
+     * (201 for a new one). Only the owner grants or changes manager. [canPresentLive] is kept for editors and managers.
+     */
+    suspend fun accountSetNotebookCollaborator(notebook: String, username: String, role: String, token: String,
+        canPresentLive: Boolean? = null): ApplicationResponse {
+        choice(role, listOf("viewer", "commenter", "editor", "manager"), "role")
+        if (username.isBlank() || username.length > 150) throw ApiException("Use a username of 1 to 150 characters.", "invalid_request")
+        return request(notebookPath(notebook) + "collaborators/", "POST", buildJsonObject {
+            put("username", username); put("role", role); canPresentLive?.let { put("can_present_live", it) }
+        }.toString(), token)
+    }
+    suspend fun accountRemoveNotebookCollaborator(notebook: String, collaboratorId: Long, token: String): ApplicationResponse =
+        request(notebookPath(notebook) + "collaborators/" + positiveId(collaboratorId, "collaborator ID") + "/", "DELETE", token = token)
+    /** Leave a Notebook you were invited to. */
+    suspend fun accountLeaveNotebook(notebook: String, token: String): ApplicationResponse =
+        request(notebookPath(notebook) + "membership/", "DELETE", token = token)
+    /** The Notebook's read-only share link, if one is active. */
+    suspend fun accountNotebookShare(notebook: String, token: String): ApplicationResponse =
+        request(notebookPath(notebook) + "share/", token = token)
+    /** Create a share link that opens a read-only view without signing in; an active link is returned unchanged. Keep its url private. */
+    suspend fun accountCreateNotebookShare(notebook: String, token: String): ApplicationResponse =
+        request(notebookPath(notebook) + "share/", "PUT", token = token)
+    suspend fun accountRevokeNotebookShare(notebook: String, token: String): ApplicationResponse =
+        request(notebookPath(notebook) + "share/", "DELETE", token = token)
+    /** Add a folder last at the top level, or inside folder [parentId] (201). Each call adds another. */
+    suspend fun accountCreateNotebookSection(notebook: String, title: String, token: String, parentId: Long? = null): ApplicationResponse {
+        if (title.isBlank()) throw ApiException("Use a folder title.", "invalid_request")
+        return request(notebookPath(notebook) + "sections/", "POST", buildJsonObject {
+            put("title", title); parentId?.let { put("parent_id", positiveId(it, "folder ID")) }
+        }.toString(), token)
+    }
+    suspend fun accountRenameNotebookSection(notebook: String, sectionId: Long, title: String, token: String): ApplicationResponse =
+        request(sectionPath(notebook, sectionId), "PATCH", titleBody(title), token)
+    /** Delete a folder with every nested folder and chapter. */
+    suspend fun accountDeleteNotebookSection(notebook: String, sectionId: Long, token: String): ApplicationResponse =
+        request(sectionPath(notebook, sectionId), "DELETE", token = token)
+    /** Move a folder with its contents into [parentId] (null: the top level) before [beforeSectionId] (null: last). */
+    suspend fun accountMoveNotebookSection(notebook: String, sectionId: Long, token: String, parentId: Long? = null,
+        beforeSectionId: Long? = null): ApplicationResponse =
+        request(sectionPath(notebook, sectionId) + "move/", "POST", buildJsonObject {
+            parentId?.let { put("parent_id", positiveId(it, "folder ID")) }
+            beforeSectionId?.let { put("before_section_id", positiveId(it, "folder ID")) }
+        }.toString(), token)
+    /**
+     * Add a chapter last at the top level or in folder [sectionId] (201). It starts from [initialPosition] (a FEN or
+     * one PGN game) or from a [game] slug you can open, not both; otherwise from the standard position.
+     */
+    suspend fun accountCreateNotebookChapter(notebook: String, token: String, title: String? = null, sectionId: Long? = null,
+        initialPosition: String? = null, game: String? = null): ApplicationResponse {
+        if (initialPosition != null && game != null) throw ApiException("Use at most one of initialPosition and game.", "invalid_request")
+        return request(notebookPath(notebook) + "chapters/", "POST", buildJsonObject {
+            title?.let { put("title", it) }; sectionId?.let { put("section_id", positiveId(it, "folder ID")) }
+            initialPosition?.let { put("initial_position", it) }; game?.let { put("game", it) }
+        }.toString(), token)
+    }
+    /** One chapter with its PGN and the content_version a save starts from. */
+    suspend fun accountNotebookChapter(notebook: String, chapterId: Long, token: String): ApplicationResponse =
+        request(chapterPath(notebook, chapterId), token = token)
+    /**
+     * Replace a chapter's PGN, and optionally its title, if it is still at [contentVersion]. Otherwise the reply
+     * is 409 with errorCode "chapter_conflict" and nothing changes: the reply does not carry the newer version, so
+     * read the chapter again, reapply the edit and save with its content_version. A retried successful save
+     * also conflicts, so never retry a save automatically.
+     */
+    suspend fun accountSaveNotebookChapter(notebook: String, chapterId: Long, pgn: String, contentVersion: Long, token: String,
+        title: String? = null): ApplicationResponse =
+        request(chapterPath(notebook, chapterId), "PUT", buildJsonObject {
+            put("pgn", pgn); put("content_version", positiveId(contentVersion, "content version"))
+            title?.let { put("title", it) }
+        }.toString(), token)
+    /** Rename a chapter. This raises its content_version, so a save from an earlier read then conflicts. */
+    suspend fun accountRenameNotebookChapter(notebook: String, chapterId: Long, title: String, token: String): ApplicationResponse =
+        request(chapterPath(notebook, chapterId), "PATCH", titleBody(title), token)
+    suspend fun accountDeleteNotebookChapter(notebook: String, chapterId: Long, token: String): ApplicationResponse =
+        request(chapterPath(notebook, chapterId), "DELETE", token = token)
+    /** Move a chapter into folder [sectionId] (null: the top level) before [beforeChapterId] (null: last). */
+    suspend fun accountMoveNotebookChapter(notebook: String, chapterId: Long, token: String, sectionId: Long? = null,
+        beforeChapterId: Long? = null): ApplicationResponse =
+        request(chapterPath(notebook, chapterId) + "move/", "POST", buildJsonObject {
+            sectionId?.let { put("section_id", positiveId(it, "folder ID")) }
+            beforeChapterId?.let { put("before_chapter_id", positiveId(it, "chapter ID")) }
+        }.toString(), token)
+    /** The chapter's read-only share link, if one is active. */
+    suspend fun accountNotebookChapterShare(notebook: String, chapterId: Long, token: String): ApplicationResponse =
+        request(chapterPath(notebook, chapterId) + "share/", token = token)
+    /** Create a link to this chapter alone; an active link is returned unchanged. Keep its url private. */
+    suspend fun accountCreateNotebookChapterShare(notebook: String, chapterId: Long, token: String): ApplicationResponse =
+        request(chapterPath(notebook, chapterId) + "share/", "PUT", token = token)
+    suspend fun accountRevokeNotebookChapterShare(notebook: String, chapterId: Long, token: String): ApplicationResponse =
+        request(chapterPath(notebook, chapterId) + "share/", "DELETE", token = token)
+
     // The Gym: play the site's bots. Personal tokens need gym:read to read and
     // gym:play for the rest; device sessions pass both. Decode replies with the
     // generated models, for example GymGameState.serializer().
@@ -194,9 +426,13 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
         val query = libraryPage(page, pageSize) + if (player == "others") "&player=others" else ""
         return request("/api/v1/account/gym/games/?$query", token = token)
     }
-    /** Start a game (201). [time] is "unlimited", a preset such as "3+0", or "custom" with [minutes] and [increment]. */
+    /**
+     * Start a game (201). [time] is "unlimited", a preset such as "3+0", or "custom" with [minutes] and [increment].
+     * [version] is a key from the bot's versions in accountGym, such as "v4"; without it the bot's default_version
+     * plays, and the game keeps its version to the end.
+     */
     suspend fun accountGymNewGame(botKey: String, token: String, color: String = "white", time: String = "unlimited",
-        minutes: Int? = null, increment: Int? = null): ApplicationResponse {
+        minutes: Int? = null, increment: Int? = null, version: String? = null): ApplicationResponse {
         if (color !in listOf("white", "black", "random")) throw ApiException("color must be white, black or random.", "invalid_request")
         if (time.isEmpty()) throw ApiException("time must be unlimited, a preset such as 3+0, or custom.", "invalid_request")
         if (time == "custom") {
@@ -206,9 +442,11 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
         } else if (minutes != null || increment != null) {
             throw ApiException("minutes and increment apply only to time \"custom\".", "invalid_request")
         }
+        if (version != null && version.isBlank()) throw ApiException("version must be a key from the bot's versions.", "invalid_request")
         val body = buildJsonObject {
             put("color", color); put("time", time)
             minutes?.let { put("minutes", it) }; increment?.let { put("increment", it) }
+            version?.let { put("version", it) }
         }
         return request("/api/v1/account/gym/bots/" + segment(botKey) + "/games/", "POST", body.toString(), token)
     }
@@ -327,6 +565,45 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
         return execute("/api/v1/mobile/position-scan/", "POST", body, token, 85_000)
     }
 
+    // The Android app's device sessions. Home and release metadata are public; sign-in returns a device
+    // session token, and the session and settings calls accept only such a token, never a personal API token.
+    /** Archive counts, the Game of the Day and the app's action links. */
+    suspend fun mobileHome(): ApplicationResponse = request("/api/v1/mobile/home/")
+    /** The current Android release: version, APK URL, SHA-256 checksum and size. */
+    suspend fun mobileAndroidRelease(): ApplicationResponse = request("/api/v1/mobile/android/release/")
+    /**
+     * Sign in with a username and password (201): `token` is the device session credential. A 401
+     * two_factor_required asks for [twoFactorCode], an authenticator or recovery code. The password is sent
+     * only over HTTPS or loopback development, as bearer tokens are. Never log the password.
+     */
+    suspend fun mobileSignIn(username: String, password: String, twoFactorCode: String? = null,
+        deviceName: String? = null): ApplicationResponse {
+        if (!protectsCredentials(transport.base)) {
+            throw ApiException("Sign in only over HTTPS or loopback development.", "unsafe_credentials")
+        }
+        if (username.isBlank() || username.length > 150 || password.isEmpty() || (deviceName?.length ?: 0) > 80) {
+            throw ApiException("Use a username of 1 to 150 characters, a password and a device name of at most 80.", "invalid_request")
+        }
+        return request("/api/v1/account/mobile/login/", "POST", buildJsonObject {
+            put("username", username); put("password", password)
+            twoFactorCode?.let { put("two_factor_code", it) }; deviceName?.let { put("device_name", it) }
+        }.toString())
+    }
+    /** End this device session; [token] stops working. */
+    suspend fun mobileSignOut(token: String): ApplicationResponse = request("/api/v1/account/mobile/logout/", "POST", token = token)
+    /** The account's device sessions, marking this one. */
+    suspend fun mobileSessions(token: String): ApplicationResponse = request("/api/v1/account/mobile/sessions/", token = token)
+    suspend fun mobileRevokeSession(sessionId: Long, token: String): ApplicationResponse =
+        request("/api/v1/account/mobile/sessions/" + positiveId(sessionId, "session ID") + "/revoke/", "POST", token = token)
+    /** Revoke every device session of the account. */
+    suspend fun mobileRevokeAllSessions(token: String): ApplicationResponse =
+        request("/api/v1/account/mobile/sessions/revoke-all/", "POST", token = token)
+    /** The app's board, engine, sound, speech, Cast and debug settings with the choices they offer. */
+    suspend fun mobileSettings(token: String): ApplicationResponse = request("/api/v1/account/mobile/settings/", token = token)
+    /** Change only the settings [changes] sets. */
+    suspend fun mobileUpdateSettings(changes: MobileSettingsChanges, token: String): ApplicationResponse =
+        request("/api/v1/account/mobile/settings/", "POST", nonEmpty(changes.toJson()), token)
+
     /** Fetch a file. The bytes are returned only for a 2xx; otherwise [ApplicationDownload.error] holds the JSON reply. */
     suspend fun download(path: String, token: String? = null, method: String = "GET", body: String? = null,
         accept: String = "*/*", ccnbFormat: Int? = null): ApplicationDownload {
@@ -367,9 +644,7 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
         val url = transport.base.resolve(path) ?: throw ApiException("Invalid API path.", "unsafe_url")
         if (token != null) {
             if (!Regex("[\\x21-\\x7e]{1,4096}").matches(token)) throw ApiException("Invalid bearer token.", "invalid_token")
-            if (!isPrivateApiPath(pathname) ||
-                url.scheme != "https" && url.host !in listOf("localhost", "127.0.0.1", "::1") &&
-                !(options.allowInsecureEmulator && url.host == "10.0.2.2")) {
+            if (!isPrivateApiPath(pathname) || !protectsCredentials(url)) {
                 throw ApiException("Bearer credentials require a private API over HTTPS or loopback development.", "unsafe_credentials")
             }
         }
@@ -389,6 +664,11 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
     }
 
     override fun close() = transport.close()
+
+    /** Credentials travel only over HTTPS, loopback development, or the opted-in Android emulator alias. */
+    private fun protectsCredentials(url: HttpUrl): Boolean =
+        url.scheme == "https" || url.host in listOf("localhost", "127.0.0.1", "::1") ||
+            options.allowInsecureEmulator && url.host == "10.0.2.2"
 
     private fun libraryPage(page: Int, pageSize: Int): String {
         if (page < 1 || pageSize !in 1..100) throw ApiException("Use a positive page and a page size from 1 to 100.", "invalid_pagination")
@@ -442,6 +722,47 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
             if (!NOTEBOOK_UUID.matches(value)) throw ApiException("Use a Notebook UUID from the API.", "invalid_query")
             return value.lowercase()
         }
+
+        private val COLLECTION_SORTS = listOf("added", "date_desc", "date_asc", "player", "manual")
+        private val IMPORTED_SORTS = listOf("imported_desc", "imported_asc", "date_desc", "date_asc", "player", "visibility")
+        private val IMPORT_SOURCES = listOf("lichess", "chesscom", "pgn")
+        private val NOTEBOOK_VISIBILITIES = listOf("private", "unlisted", "public")
+
+        private fun choice(value: String?, allowed: List<String>, name: String) {
+            if (value != null && value !in allowed) throw ApiException(name + " must be one of " + allowed.joinToString() + ".", "invalid_request")
+        }
+
+        /** A partial update must change something; an empty body would be a request that does nothing. */
+        private fun nonEmpty(body: JsonObject): String {
+            if (body.isEmpty()) throw ApiException("Provide at least one value to change.", "invalid_request")
+            return body.toString()
+        }
+
+        private fun titleBody(title: String): String {
+            if (title.isBlank()) throw ApiException("Use a non-blank title.", "invalid_request")
+            return buildJsonObject { put("title", title) }.toString()
+        }
+
+        /** [path] with the non-null [params] percent-encoded as its query string. */
+        private fun withQuery(path: String, vararg params: Pair<String, Any?>): String {
+            val query = params.filter { it.second != null }
+                .joinToString("&") { (key, value) -> key + "=" + URLEncoder.encode(value.toString(), "UTF-8") }
+            return if (query.isEmpty()) path else "$path?$query"
+        }
+
+        private fun collection(collectionId: Long): String =
+            "/api/v1/account/collections/" + positiveId(collectionId, "collection ID") + "/"
+
+        private fun collectionItem(collectionId: Long, itemId: Long): String =
+            collection(collectionId) + "items/" + positiveId(itemId, "item ID") + "/"
+
+        private fun notebookPath(notebook: String): String = "/api/v1/account/notebooks/" + notebookUuid(notebook) + "/"
+
+        private fun sectionPath(notebook: String, sectionId: Long): String =
+            notebookPath(notebook) + "sections/" + positiveId(sectionId, "folder ID") + "/"
+
+        private fun chapterPath(notebook: String, chapterId: Long): String =
+            notebookPath(notebook) + "chapters/" + positiveId(chapterId, "chapter ID") + "/"
 
         private fun gifQuery(orientation: String): String = when (orientation) {
             "white" -> ""

@@ -24,6 +24,7 @@
 package com.classicchess.api
 
 import com.classicchess.api.PublicBeginnerGamesStagesItem
+import com.classicchess.api.PublicBeginnerGamesStartersItem
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
@@ -41,6 +42,7 @@ import kotlinx.serialization.encoding.Encoder
  * @param count
  * @param stages
  * @param urls Follow these links. Paths beginning with / resolve against the API origin.
+ * @param starters The guide's players to study first, in its order, each linking to their notable games. Absent from older servers.
  */
 @Serializable
 
@@ -57,7 +59,11 @@ data class PublicBeginnerGames (
 
     /* Follow these links. Paths beginning with / resolve against the API origin. */
     @SerialName(value = "urls")
-    val urls: kotlin.collections.Map<kotlin.String, kotlin.String?>
+    val urls: kotlin.collections.Map<kotlin.String, kotlin.String?>,
+
+    /* The guide's players to study first, in its order, each linking to their notable games. Absent from older servers. */
+    @SerialName(value = "starters")
+    val starters: kotlin.collections.List<PublicBeginnerGamesStartersItem>? = null
 
 ) {
 

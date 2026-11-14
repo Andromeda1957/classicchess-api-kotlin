@@ -39,6 +39,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param kind
  * @param label
  * @param url Site page for the player, event or Daily Game.
+ * @param slug Player or event slug; absent for the Daily Game and from older servers.
+ * @param apiUrl API counterpart of url: the player's games (listPublicGames with archive_player), the event's about page (getCuratedEventAbout) or the Daily Game (getDailyGame). Absent from older servers.
  */
 @Serializable
 
@@ -52,7 +54,15 @@ data class PublicGameMembershipsItem (
 
     /* Site page for the player, event or Daily Game. */
     @SerialName(value = "url")
-    val url: kotlin.String
+    val url: kotlin.String,
+
+    /* Player or event slug; absent for the Daily Game and from older servers. */
+    @SerialName(value = "slug")
+    val slug: kotlin.String? = null,
+
+    /* API counterpart of url: the player's games (listPublicGames with archive_player), the event's about page (getCuratedEventAbout) or the Daily Game (getDailyGame). Absent from older servers. */
+    @SerialName(value = "api_url")
+    val apiUrl: kotlin.String? = null
 
 ) {
 

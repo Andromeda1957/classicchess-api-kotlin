@@ -26,6 +26,7 @@ package com.classicchess.api
 import com.classicchess.api.EventBiography
 import com.classicchess.api.LabelValue
 import com.classicchess.api.PublicEvent
+import com.classicchess.api.PublicEventAboutArchiveGap
 import kotlinx.serialization.json.JsonElement
 
 import kotlinx.serialization.Serializable
@@ -47,6 +48,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param autoVitals
  * @param bio
  * @param crosstable
+ * @param archiveGap
+ * @param collectionNote The note a game collection's page prints; empty for other events and for a collection without one. Absent from older servers.
  */
 @Serializable
 
@@ -71,7 +74,14 @@ data class PublicEventAbout (
     val bio: EventBiography?,
 
     @SerialName(value = "crosstable")
-    val crosstable: JsonElement?
+    val crosstable: JsonElement?,
+
+    @SerialName(value = "archive_gap")
+    val archiveGap: PublicEventAboutArchiveGap? = null,
+
+    /* The note a game collection's page prints; empty for other events and for a collection without one. Absent from older servers. */
+    @SerialName(value = "collection_note")
+    val collectionNote: kotlin.String? = null
 
 ) {
 

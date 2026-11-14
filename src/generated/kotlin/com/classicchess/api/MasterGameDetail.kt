@@ -23,7 +23,9 @@
 
 package com.classicchess.api
 
+import com.classicchess.api.HeadToHeadRecord
 import com.classicchess.api.Mainline
+import com.classicchess.api.MasterGameArchivePlayers
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
@@ -59,6 +61,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param urls Follow these links. Paths beginning with / resolve against the API origin.
  * @param pgn
  * @param mainline
+ * @param headToHead Every MasterDB game between White and Black, from White's side; null when the names do not resolve to two players with a game together, or the record is unavailable. Absent from older servers.
+ * @param archivePlayers
  */
 @Serializable
 
@@ -129,7 +133,14 @@ data class MasterGameDetail (
     val pgn: kotlin.String,
 
     @SerialName(value = "mainline")
-    val mainline: Mainline
+    val mainline: Mainline,
+
+    /* Every MasterDB game between White and Black, from White's side; null when the names do not resolve to two players with a game together, or the record is unavailable. Absent from older servers. */
+    @SerialName(value = "head_to_head")
+    val headToHead: HeadToHeadRecord? = null,
+
+    @SerialName(value = "archive_players")
+    val archivePlayers: MasterGameArchivePlayers? = null
 
 ) {
 

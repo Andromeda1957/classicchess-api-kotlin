@@ -40,6 +40,7 @@ import kotlinx.serialization.encoding.Encoder
  * @param title
  * @param sectionId
  * @param sortOrder
+ * @param contentVersion Send it back with a chapter save. Every content save and rename raises it.
  * @param updatedAt
  * @param urls Follow these links. Paths beginning with / resolve against the API origin.
  */
@@ -58,6 +59,10 @@ data class AccountNotebookDetailChaptersItem (
 
     @SerialName(value = "sort_order")
     val sortOrder: kotlin.Long,
+
+    /* Send it back with a chapter save. Every content save and rename raises it. */
+    @SerialName(value = "content_version")
+    val contentVersion: kotlin.Long,
 
     @SerialName(value = "updated_at")
     val updatedAt: kotlin.String,

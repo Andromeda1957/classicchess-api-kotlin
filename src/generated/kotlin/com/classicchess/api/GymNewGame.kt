@@ -40,6 +40,7 @@ import kotlinx.serialization.encoding.Encoder
  * @param time unlimited, one of time_controls.presets, or custom with minutes and increment.
  * @param minutes Minutes per side for time=custom.
  * @param increment Seconds added per move for time=custom.
+ * @param version A version key from the bot's versions, for example v4. Omitted, the game plays the bot's default_version; an unknown key is refused with invalid_version.
  */
 @Serializable
 
@@ -58,7 +59,11 @@ data class GymNewGame (
 
     /* Seconds added per move for time=custom. */
     @SerialName(value = "increment")
-    val increment: kotlin.Long? = null
+    val increment: kotlin.Long? = null,
+
+    /* A version key from the bot's versions, for example v4. Omitted, the game plays the bot's default_version; an unknown key is refused with invalid_version. */
+    @SerialName(value = "version")
+    val version: kotlin.String? = null
 
 ) {
 

@@ -22,6 +22,7 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.Response
 import okio.Buffer
 
@@ -87,6 +88,7 @@ internal fun ccnbFormatHeader(value: Int?): String? {
 
 internal class Transport(private val options: ClientOptions) : Closeable {
     private val masterReadPath = Regex("/api/v1/games/(?:g[0-9a-z]{1,66}-[0-9a-f]{12}/(?:pgn/)?)?")
+    private val lichessGamePath = Regex("/api/v1/opening-explorer/lichess/games/[A-Za-z0-9]{8}/")
     val base: HttpUrl = options.baseUrl.toHttpUrlOrNull()
         ?: throw ApiException("Invalid API origin.", "invalid_options")
     private val client: OkHttpClient
@@ -138,8 +140,8 @@ internal class Transport(private val options: ClientOptions) : Closeable {
                 || url.encodedPath.startsWith("/api/v1/annotated/")
                 || url.encodedPath in listOf("/api/v1/players/", "/api/v1/stats/", "/api/v1/games/export/",
                     "/api/v1/opening-explorer/", "/api/v1/opening-explorer/sources/", "/api/v1/opening-explorer/lichess/",
-                    "/api/v1/tablebase/")
-                || masterReadPath.matches(url.encodedPath))) {
+                    "/api/v1/opening-explorer/player/", "/api/v1/analysis/game-link/", "/api/v1/tablebase/")
+                || masterReadPath.matches(url.encodedPath) || lichessGamePath.matches(url.encodedPath))) {
             throw ApiException("Refused a link outside the configured public API.", "unsafe_url")
         }
         return url
@@ -159,8 +161,17 @@ internal class Transport(private val options: ClientOptions) : Closeable {
         return response.text
     }
 
-    suspend fun ccnbDownload(bookSlug: String, ccnbFormat: Int?): ByteArray {
-        val url = base.resolve("/annotated/${segment(bookSlug)}/download/")!!
+    /** A public POST, such as a token export or a game-link lookup. Like every write, it is never replayed. */
+    suspend fun post(url: HttpUrl, body: RequestBody, accept: String): String {
+        safeUrl(url.toString())
+        val response = exchange(Request.Builder().url(url).header("Accept", accept).post(body).build())
+        if (response.status !in 200..299) throw httpError(response)
+        return response.text
+    }
+
+    /** Exact package bytes from a fixed same-origin book path; no credentials are sent and redirects are refused. */
+    suspend fun ccnbDownload(path: String, ccnbFormat: Int?): ByteArray {
+        val url = base.resolve(path)!!
         val request = Request.Builder().url(url).header("Accept", "application/vnd.classicchess.notebook").get()
         ccnbFormatHeader(ccnbFormat)?.let { request.header("CCNB-Format", it) }
         val response = exchange(request.build())

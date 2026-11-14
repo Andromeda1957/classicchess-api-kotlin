@@ -43,6 +43,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param allowPublicExports
  * @param role owner or the collaborator role for members; null for a Notebook opened only through its visibility.
  * @param canExport
+ * @param canEdit Owner, manager or editor: may change folders, chapters and chapter content.
+ * @param canManage Owner or manager: may rename the Notebook and change settings, collaborators and share links.
  * @param chapterCount
  * @param updatedAt
  * @param urls Follow these links. Paths beginning with / resolve against the API origin.
@@ -72,6 +74,14 @@ data class AccountNotebook (
 
     @SerialName(value = "can_export")
     val canExport: kotlin.Boolean,
+
+    /* Owner, manager or editor: may change folders, chapters and chapter content. */
+    @SerialName(value = "can_edit")
+    val canEdit: kotlin.Boolean,
+
+    /* Owner or manager: may rename the Notebook and change settings, collaborators and share links. */
+    @SerialName(value = "can_manage")
+    val canManage: kotlin.Boolean,
 
     @SerialName(value = "chapter_count")
     val chapterCount: kotlin.Long,

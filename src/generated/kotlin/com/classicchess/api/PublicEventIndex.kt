@@ -24,6 +24,7 @@
 package com.classicchess.api
 
 import com.classicchess.api.PublicEventIndexEventsItem
+import com.classicchess.api.PublicEventIndexSectionsItem
 import com.classicchess.api.PublicEventIndexSeriesCardsItem
 
 import kotlinx.serialization.Serializable
@@ -42,6 +43,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param seriesSlug
  * @param seriesCards
  * @param events
+ * @param eventOrder series requests only: event slugs in the order the series page lists them, which for a curated series is its editorial order. events stays oldest first. Absent from older servers.
+ * @param sections series requests only: the series page's named sections in page order; empty when the page has none, including Matches and Misc. Absent from older servers.
  */
 @Serializable
 
@@ -57,7 +60,15 @@ data class PublicEventIndex (
     val seriesCards: kotlin.collections.List<PublicEventIndexSeriesCardsItem>? = null,
 
     @SerialName(value = "events")
-    val events: kotlin.collections.List<PublicEventIndexEventsItem>? = null
+    val events: kotlin.collections.List<PublicEventIndexEventsItem>? = null,
+
+    /* series requests only: event slugs in the order the series page lists them, which for a curated series is its editorial order. events stays oldest first. Absent from older servers. */
+    @SerialName(value = "event_order")
+    val eventOrder: kotlin.collections.List<kotlin.String>? = null,
+
+    /* series requests only: the series page's named sections in page order; empty when the page has none, including Matches and Misc. Absent from older servers. */
+    @SerialName(value = "sections")
+    val sections: kotlin.collections.List<PublicEventIndexSectionsItem>? = null
 
 ) {
 

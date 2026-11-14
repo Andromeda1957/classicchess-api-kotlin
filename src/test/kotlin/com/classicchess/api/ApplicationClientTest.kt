@@ -50,6 +50,80 @@ class ApplicationClientTest {
         assertNull(server.takeRequest().getHeader("Authorization"))
     }
 
+    @Test fun deviceSessionCallsSendTheDeviceTokenOnlyWhereTheyNeedOne() = runBlocking {
+        val sessions = "/api/v1/account/mobile/sessions/"
+        val settings = "/api/v1/account/mobile/settings/"
+        val cases = listOf<Pair<suspend () -> ApplicationResponse, List<String?>>>(
+            suspend { client.mobileHome() } to listOf("GET", "/api/v1/mobile/home/", null, null),
+            suspend { client.mobileAndroidRelease() } to listOf("GET", "/api/v1/mobile/android/release/", null, null),
+            suspend { client.mobileSignIn("ann", "test-only-password", "123456", "Pixel 9") } to listOf("POST",
+                "/api/v1/account/mobile/login/", """{"username": "ann", "password": "test-only-password",
+                    "two_factor_code": "123456", "device_name": "Pixel 9"}""", null),
+            suspend { client.mobileSignOut("test-device") } to listOf("POST", "/api/v1/account/mobile/logout/", "", "test-device"),
+            suspend { client.mobileSessions("test-device") } to listOf("GET", sessions, null, "test-device"),
+            suspend { client.mobileRevokeSession(3, "test-device") } to listOf("POST", "${sessions}3/revoke/", "", "test-device"),
+            suspend { client.mobileRevokeAllSessions("test-device") } to listOf("POST", "${sessions}revoke-all/", "", "test-device"),
+            suspend { client.mobileSettings("test-device") } to listOf("GET", settings, null, "test-device"),
+            suspend { client.mobileUpdateSettings(MobileSettingsChanges(soundSet = "classic", speechLevel = 1.5,
+                castCcEmails = listOf("coach@example.com")), "test-device") } to listOf("POST", settings,
+                """{"sound_set": "classic", "speech_level": 1.5, "cast_cc_emails": ["coach@example.com"]}""", "test-device"),
+        )
+        for ((call, expected) in cases) {
+            val (method, path, body, token) = expected
+            server.enqueue(MockResponse().setBody("{}"))
+            assertTrue(call().ok)
+            val request = server.takeRequest()
+            assertEquals(method, request.method)
+            assertEquals(path, request.path)
+            assertEquals(token?.let { "Bearer $it" }, request.getHeader("Authorization"))
+            val sentBody = request.body.readUtf8()
+            if (body.isNullOrEmpty()) assertEquals("", sentBody)
+            else assertEquals(Json.parseToJsonElement(body), Json.parseToJsonElement(sentBody))
+        }
+        val invalid = listOf<suspend () -> Unit>(
+            { client.mobileSignIn(" ", "test-only-password") }, { client.mobileSignIn("ann", "") },
+            { client.mobileSignIn("ann", "test-only-password", deviceName = "x".repeat(81)) },
+            { client.mobileRevokeSession(0, "test-device") }, { client.mobileUpdateSettings(MobileSettingsChanges(), "test-device") },
+        )
+        for (call in invalid) assertFailsWith<ApiException> { call() }
+        assertEquals(cases.size, server.requestCount)
+    }
+
+    @Test fun passwordsAreNeverSentOverPlainHttp() = runBlocking {
+        ApplicationClient(ClientOptions(baseUrl = "http://plain-http.example.invalid", timeoutMillis = 100)).use { insecure ->
+            assertEquals("unsafe_credentials", assertFailsWith<ApiException> {
+                insecure.mobileSignIn("ann", "test-only-password")
+            }.code)
+        }
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test fun preferenceChangesPatchOnlyTheKeysTheyName() = runBlocking {
+        repeat(2) { server.enqueue(MockResponse().setBody("{}")) }
+        assertTrue(client.accountPreferences("test-device").ok)
+        client.accountUpdatePreferences(PreferenceChanges(boardTheme = "green", engineDepth = 22, speechLevel = 1.5,
+            viewerKeybindings = mapOf("flip" to listOf("f", "Shift+F"))), "test-device")
+        val read = server.takeRequest()
+        val patch = server.takeRequest()
+        assertEquals("GET" to "/api/v1/account/preferences/", read.method to read.path)
+        assertEquals("PATCH" to "/api/v1/account/preferences/", patch.method to patch.path)
+        assertEquals(Json.parseToJsonElement("""{"board_theme": "green", "engine_depth": 22, "speech_level": 1.5,
+            "viewer_keybindings": {"flip": ["f", "Shift+F"]}}"""), Json.parseToJsonElement(patch.body.readUtf8()))
+        listOf(read, patch).forEach { assertEquals("Bearer test-device", it.getHeader("Authorization")) }
+        assertEquals("invalid_request", assertFailsWith<ApiException> {
+            client.accountUpdatePreferences(PreferenceChanges(), "test-device")
+        }.code)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test fun failedRepliesExposeTheirApiErrorCode() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(401)
+            .setBody("""{"error": {"code": "two_factor_required", "message": "Enter a code."}}"""))
+        assertEquals("two_factor_required", client.mobileSignIn("ann", "test-only-password").errorCode)
+        server.enqueue(MockResponse().setResponseCode(503).setBody("""{"ok": false, "error": "Unavailable."}"""))
+        assertNull(client.mobileHome().errorCode)
+    }
+
     @Test fun unsafePathsAndPublicCredentialsFailBeforeNetworking() = runBlocking {
         for (path in listOf("https://other.invalid/api/v1/account/me/", "//other.invalid/api/v1/account/me/",
             "/api/v1/../account/", "/api/v1/%2e%2e/account/", "/api/v1/account/me/#fragment", "/static/portrait.webp",

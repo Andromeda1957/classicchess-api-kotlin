@@ -23,9 +23,11 @@
 
 package com.classicchess.api
 
+import com.classicchess.api.HeadToHeadRecord
 import com.classicchess.api.MasterGame
 import com.classicchess.api.MasterGamePagePlayerChoicesItem
 import com.classicchess.api.MasterGamePagePlayerSuggestionsItem
+import com.classicchess.api.MasterSearchInterpretation
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
@@ -55,6 +57,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param filtersApplied True when player, side and result constraints are applied before pagination.
  * @param playerChoices Selectable identities when a player name is ambiguous.
  * @param playerSuggestions Full player names for spelling help when the query resolves to a player or matchup; matchups include both players, search_name preserves any year constraint, and game results remain available.
+ * @param interpretation null when q names several possible players (see player_choices). Absent from older servers.
+ * @param headToHead The pair's record over every game in q's years, as the website's score card shows it; player, side and result filters do not apply. null unless interpretation.kind is head_to_head and the record is available. Absent from older servers.
  */
 @Serializable
 
@@ -112,7 +116,15 @@ data class MasterGamePage (
 
     /* Full player names for spelling help when the query resolves to a player or matchup; matchups include both players, search_name preserves any year constraint, and game results remain available. */
     @SerialName(value = "player_suggestions")
-    val playerSuggestions: kotlin.collections.List<MasterGamePagePlayerSuggestionsItem>? = null
+    val playerSuggestions: kotlin.collections.List<MasterGamePagePlayerSuggestionsItem>? = null,
+
+    /* null when q names several possible players (see player_choices). Absent from older servers. */
+    @SerialName(value = "interpretation")
+    val interpretation: MasterSearchInterpretation? = null,
+
+    /* The pair's record over every game in q's years, as the website's score card shows it; player, side and result filters do not apply. null unless interpretation.kind is head_to_head and the record is available. Absent from older servers. */
+    @SerialName(value = "head_to_head")
+    val headToHead: HeadToHeadRecord? = null
 
 ) {
 

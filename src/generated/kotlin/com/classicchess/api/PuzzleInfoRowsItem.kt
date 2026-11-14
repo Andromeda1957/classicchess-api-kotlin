@@ -38,6 +38,7 @@ import kotlinx.serialization.encoding.Encoder
  *
  * @param label A PGN tag name such as Event, Date, White or WhiteElo.
  * @param `value`
+ * @param url The website page the row's value links to, as the trainer's Game info shows it: a study player's about page on White or Black, or the event's about page on Event. Empty when the row links nowhere.
  */
 @Serializable
 
@@ -48,7 +49,11 @@ data class PuzzleInfoRowsItem (
     val label: kotlin.String,
 
     @SerialName(value = "value")
-    val `value`: kotlin.String
+    val `value`: kotlin.String,
+
+    /* The website page the row's value links to, as the trainer's Game info shows it: a study player's about page on White or Black, or the event's about page on Event. Empty when the row links nowhere. */
+    @SerialName(value = "url")
+    val url: kotlin.String? = null
 
 ) {
 
