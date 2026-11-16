@@ -460,9 +460,13 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
             buildJsonObject { put("move", move); put("ply", ply(ply)) }.toString(), token)
     }
     /**
-     * Ask for the bot's move. A 429 capacity_exhausted means the engine is busy: wait retryAfter
-     * seconds and ask again with the same ply. A 429 engine_budget means this account has used its
+     * Ask for the bot's move. Historical bots return 429 capacity_exhausted while their engine
+     * is busy: wait retryAfter seconds and ask again with the same ply.
+     * A 429 engine_budget means this account has used its
      * 30 minutes of engine time for the current hour; ask again after retryAfter seconds.
+     * When a Strength bot is offered, 202 carries the complete game with thinking=true.
+     * Read [accountGymGame] until thinking=false; thinking_error reports a failed job.
+     * Repeated requests at the same ply coalesce. Polling and retries are caller-controlled.
      */
     suspend fun accountGymBotMove(gameId: Long, ply: Int, token: String): ApplicationResponse =
         request(gymGame(gameId) + "bot-move/", "POST", buildJsonObject { put("ply", ply(ply)) }.toString(), token)
@@ -557,12 +561,23 @@ class ApplicationClient(private val options: ClientOptions = ClientOptions()) : 
         return execute(path, method, body?.toRequestBody("application/json; charset=utf-8".toMediaType()), token, timeoutMillis)
     }
 
-    /** Upload the app's already resized JPEG. OkHttp owns multipart quoting and boundaries. */
-    suspend fun scanPosition(image: ByteArray, token: String): ApplicationResponse {
+    /** Upload an already resized JPEG; screen mode may include TL/TR/BR/BL normalized corner pairs. */
+    suspend fun scanPosition(
+        image: ByteArray,
+        token: String,
+        mode: String = "diagram",
+        corners: List<Double>? = null,
+    ): ApplicationResponse {
         if (image.isEmpty() || image.size > 850_000) throw ApiException("Use a JPEG of at most 850000 bytes.", "invalid_upload")
+        if (mode != "diagram" && mode != "screen") throw ApiException("mode must be diagram or screen.", "invalid_request")
+        if (corners != null && (mode != "screen" || corners.size != 8 || corners.any { !it.isFinite() || it !in 0.0..1.0 })) {
+            throw ApiException("Use eight normalized corner coordinates in screen mode.", "invalid_request")
+        }
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
-            .addFormDataPart("image", "diagram.jpg", image.toRequestBody("image/jpeg".toMediaType())).build()
-        return execute("/api/v1/mobile/position-scan/", "POST", body, token, 85_000)
+            .addFormDataPart("image", "diagram.jpg", image.toRequestBody("image/jpeg".toMediaType()))
+        if (mode != "diagram") body.addFormDataPart("mode", mode)
+        if (corners != null) body.addFormDataPart("corners", JsonArray(corners.map(::JsonPrimitive)).toString())
+        return execute("/api/v1/mobile/position-scan/", "POST", body.build(), token, 85_000)
     }
 
     // The Android app's device sessions. Home and release metadata are public; sign-in returns a device

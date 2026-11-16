@@ -24,6 +24,7 @@
 package com.classicchess.api
 
 import com.classicchess.api.GymBotVersion
+import com.classicchess.api.GymRatingInterval
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
@@ -40,6 +41,12 @@ import kotlinx.serialization.encoding.Encoder
  * @param key
  * @param name
  * @param about
+ * @param engine existing for the historical bots; strength for the strength engine.
+ * @param rating
+ * @param ratingInterval
+ * @param ratingConditions
+ * @param stockfishGap Measured Elo difference: this bot minus Stockfish.
+ * @param leelaGap Measured Elo difference: this bot minus Leela.
  * @param versions Newest first, as the version menu lists them.
  * @param defaultVersion The version key a new game plays when it names none.
  * @param matchUnit What move_match counts, as the card words it, for example OF MORPHY'S MOVES MATCHED.
@@ -57,6 +64,27 @@ data class GymBot (
 
     @SerialName(value = "about")
     val about: kotlin.String,
+
+    /* existing for the historical bots; strength for the strength engine. */
+    @SerialName(value = "engine")
+    val engine: kotlin.String,
+
+    @SerialName(value = "rating")
+    val rating: kotlin.Double?,
+
+    @SerialName(value = "rating_interval")
+    val ratingInterval: GymRatingInterval?,
+
+    @SerialName(value = "rating_conditions")
+    val ratingConditions: kotlin.String?,
+
+    /* Measured Elo difference: this bot minus Stockfish. */
+    @SerialName(value = "stockfish_gap")
+    val stockfishGap: kotlin.Double?,
+
+    /* Measured Elo difference: this bot minus Leela. */
+    @SerialName(value = "leela_gap")
+    val leelaGap: kotlin.Double?,
 
     /* Newest first, as the version menu lists them. */
     @SerialName(value = "versions")

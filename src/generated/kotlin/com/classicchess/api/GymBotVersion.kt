@@ -41,8 +41,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param title A few words after the label in the version menu.
  * @param summary What the version trained on, from the bot's info dialog.
  * @param moveMatch Share of the master's own moves the bot plays in held-out games, from 0 to 1. The card shows it as a whole percent followed by the bot's match_unit.
- * @param masters Masters whose games the version trained on.
- * @param studyGames Those masters' games it trained on.
+ * @param masters Masters whose games the version trained on; null for strength.
+ * @param studyGames Those masters' games it trained on; null for strength.
  * @param ownGames The featured master's own games it trained on, counted in the bot's own_games_unit. 0 when the bot has none; the card then leaves the figure out.
  */
 @Serializable
@@ -67,19 +67,19 @@ data class GymBotVersion (
 
     /* Share of the master's own moves the bot plays in held-out games, from 0 to 1. The card shows it as a whole percent followed by the bot's match_unit. */
     @SerialName(value = "move_match")
-    val moveMatch: kotlin.Double,
+    val moveMatch: kotlin.Double?,
 
-    /* Masters whose games the version trained on. */
+    /* Masters whose games the version trained on; null for strength. */
     @SerialName(value = "masters")
-    val masters: kotlin.Long,
+    val masters: kotlin.Long?,
 
-    /* Those masters' games it trained on. */
+    /* Those masters' games it trained on; null for strength. */
     @SerialName(value = "study_games")
-    val studyGames: kotlin.Long,
+    val studyGames: kotlin.Long?,
 
     /* The featured master's own games it trained on, counted in the bot's own_games_unit. 0 when the bot has none; the card then leaves the figure out. */
     @SerialName(value = "own_games")
-    val ownGames: kotlin.Long
+    val ownGames: kotlin.Long?
 
 ) {
 

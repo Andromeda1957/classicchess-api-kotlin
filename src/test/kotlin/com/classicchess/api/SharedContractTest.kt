@@ -22,6 +22,54 @@ class SharedContractTest {
     @AfterTest fun stop() { api.close(); server.shutdown() }
     private fun cases(key: String) = fixtures.getValue(key).jsonArray.map { it.jsonObject }
 
+    @Test fun gymStatesAndNullableBotMetadataWithoutAutomaticPolling() = runBlocking {
+        val gym = fixtures.getValue("gym").jsonObject
+        val decoder = Json { ignoreUnknownKeys = true }
+        ApplicationClient(ClientOptions(baseUrl = server.url("/").toString())).use { application ->
+            server.enqueue(MockResponse().setBody(gym.getValue("home").toString()))
+            val home = decoder.decodeFromJsonElement(GymHome.serializer(), application.accountGym("fixture").data)
+            assertEquals(0.6, home.bots[0].versions!![0].moveMatch)
+            assertNull(home.bots[0].ratingInterval)
+            val strength = home.bots[1]
+            assertEquals(1450.0, strength.ratingInterval!!.low)
+            assertEquals(1550.0, strength.ratingInterval!!.high)
+            val version = strength.versions!![0]
+            assertEquals(listOf(null, null, null, null),
+                listOf(version.moveMatch, version.masters, version.studyGames, version.ownGames))
+            server.takeRequest(2, TimeUnit.SECONDS)
+            for (case in gym.getValue("game_replies").jsonArray.map { it.jsonObject }) {
+                val status = case.getValue("status").jsonPrimitive.int
+                val method = case.getValue("method").jsonPrimitive.content
+                val body = case.getValue("body").jsonObject
+                val retry = case.getValue("retry_after").jsonPrimitive.contentOrNull
+                val response = MockResponse().setResponseCode(status).setBody(body.toString())
+                if (retry != null) response.setHeader("Retry-After", retry)
+                server.enqueue(response)
+                val before = server.requestCount
+                val reply = if (method == "GET") application.accountGymGame(7, "fixture")
+                    else application.accountGymBotMove(7, 1, "fixture")
+                assertEquals(status, reply.status)
+                assertEquals(status < 300, reply.ok)
+                assertEquals(retry, reply.retryAfter)
+                assertEquals(body, reply.data)
+                if (reply.ok) {
+                    val state = decoder.decodeFromJsonElement(GymGameState.serializer(), reply.data)
+                    assertEquals(body.getValue("thinking").jsonPrimitive.boolean, state.thinking)
+                    assertEquals(body.getValue("thinking_error").jsonPrimitive.contentOrNull, state.thinkingError)
+                    assertEquals(body.getValue("moves").jsonArray.map { it.jsonPrimitive.content }, state.moves)
+                }
+                assertEquals(before + 1, server.requestCount)
+                val sent = server.takeRequest(2, TimeUnit.SECONDS)!!
+                assertEquals(method, sent.method)
+                assertEquals("/api/v1/account/gym/games/7/" + (if (method == "GET") "" else "bot-move/"), sent.path)
+                assertEquals("Bearer fixture", sent.getHeader("Authorization"))
+                val requestBody = sent.body.readUtf8()
+                if (method == "GET") assertEquals("", requestBody)
+                else assertEquals(buildJsonObject { put("ply", 1) }, Json.parseToJsonElement(requestBody))
+            }
+        }
+    }
+
     @Test fun growingPaginationSequencesReachEveryPage() = runBlocking {
         for (case in cases("page_sequences")) {
             val before = server.requestCount

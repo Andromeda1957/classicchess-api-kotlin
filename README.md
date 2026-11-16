@@ -278,7 +278,7 @@ Share links open a read-only view without signing in, so keep their URLs private
 Any account can play the Gym's bots; the moves are computed on the server.
 Personal tokens need `gym:read` to read games and `gym:play` to start and play
 them. Send the `ply` from the latest game state with each move: a stale ply
-returns 409 and plays nothing, so a repeated request is safe. The bot engine
+returns 409 and plays nothing, so a repeated request is safe. The historical bot engine
 plays one move at a time. While it is busy, `accountGymBotMove` returns 429
 with `capacity_exhausted`: wait `retryAfter` seconds and ask again with the
 same ply. Each account may use 30 minutes of engine time in each hour; once it
@@ -288,7 +288,18 @@ several versions: pass `version` with a key from the bot's `versions` in
 `accountGym`, such as `"v4"`, or omit it for the bot's `default_version`; the game
 keeps its version to the end. Anyone with a game's share link can read it with
 `ClassicChessClient.sharedGymGame(token)`. Decode replies with the generated
-models, such as `GymGameState`:
+models, such as `GymGameState`.
+
+When the server offers an approved Strength bot, its move request can return
+202 with the complete game and `thinking: true`. Read `accountGymGame(id, token)`
+until `thinking` is false. A non-null `thinking_error` reports a failed job;
+another explicit bot-move request retries it. Repeated move requests at the same
+ply coalesce. The SDK preserves the status and does not poll or retry automatically.
+Strength metadata uses `engine: "strength"`, nullable rating fields and null
+move-match/training figures; historical bots use `engine: "existing"` and retain
+their figures. Strength is optional and is not enabled by installing this SDK.
+
+This example plays one move against the historical Romantic Era Bot:
 
 ```kotlin
 import com.classicchess.api.ApplicationClient

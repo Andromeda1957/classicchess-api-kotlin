@@ -153,9 +153,32 @@ class ApplicationClientTest {
         val request = server.takeRequest()!!
         assertEquals("/api/v1/mobile/position-scan/", request.path)
         assertTrue(request.getHeader("Content-Type")!!.startsWith("multipart/form-data; boundary="))
-        assertTrue(request.body.readUtf8().contains("filename=\"diagram.jpg\""))
+        val diagramBody = request.body.readUtf8()
+        assertTrue(diagramBody.contains("filename=\"diagram.jpg\""))
+        assertFalse(diagramBody.contains("name=\"mode\""))
+        assertFalse(diagramBody.contains("name=\"corners\""))
+        val corners = listOf(0.1, 0.2, 0.9, 0.2, 0.9, 0.8, 0.1, 0.8)
+        for (points in listOf(null, corners)) {
+            server.enqueue(MockResponse().setBody("""{"status":"corners"}"""))
+            client.scanPosition(byteArrayOf(1, 2, 3), "test-device", mode = "screen", corners = points)
+            val screen = server.takeRequest()!!
+            assertEquals("Bearer test-device", screen.getHeader("Authorization"))
+            val body = screen.body.readUtf8()
+            assertTrue(body.contains("name=\"mode\"\r\n\r\nscreen\r\n"))
+            assertEquals(points != null, body.contains("name=\"corners\""))
+            if (points != null) assertTrue(body.contains("[0.1,0.2,0.9,0.2,0.9,0.8,0.1,0.8]"))
+        }
         assertEquals("invalid_upload", assertFailsWith<ApiException> { client.scanPosition(ByteArray(850_001), "test-device") }.code)
-        assertEquals(1, server.requestCount)
+        assertEquals("invalid_request", assertFailsWith<ApiException> { client.scanPosition(byteArrayOf(1), "test-device", mode = "other") }.code)
+        assertEquals("invalid_request", assertFailsWith<ApiException> { client.scanPosition(byteArrayOf(1), "test-device", corners = corners) }.code)
+        for (points in listOf(emptyList(), corners.drop(1), corners + 0.5,
+            listOf(Double.NaN) + corners.drop(1), listOf(Double.POSITIVE_INFINITY) + corners.drop(1),
+            listOf(-0.1) + corners.drop(1), listOf(1.1) + corners.drop(1))) {
+            assertEquals("invalid_request", assertFailsWith<ApiException> {
+                client.scanPosition(byteArrayOf(1), "test-device", mode = "screen", corners = points)
+            }.code)
+        }
+        assertEquals(3, server.requestCount)
     }
 
     @Test fun staleKeepAliveConnectionsRetryReadsButNeverWrites() = runBlocking {

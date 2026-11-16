@@ -371,7 +371,8 @@ private const val GYM_STATE = """{"id": 7, "bot": "morphy", "bot_name": "Paul Mo
  "moves": ["e2e4"], "sans": ["e4"], "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "ply": 1,
  "human_color": "white", "result": "*", "finished": false, "termination": "", "termination_label": "", "takebacks": 0,
  "can_abort": false, "clock": {"initial_ms": 180000, "increment_ms": 0, "white_ms": 179000, "black_ms": 180000,
- "running": "black"}, "bot_to_move": true, "opening": "King's Pawn Game", "time_control": "3+0",
+ "running": "black"}, "bot_to_move": true, "thinking": false, "thinking_error": null,
+ "opening": "King's Pawn Game", "time_control": "3+0",
  "created_at": "2026-09-25T12:00:00+00:00", "urls": {"api": "/api/v1/account/gym/games/7/"}, "extra": 1}"""
 
 private const val PUZZLE = """{"id": "p-000ccc1f", "heading": "Puzzle from Attacker, A vs Defender, D, 1910",

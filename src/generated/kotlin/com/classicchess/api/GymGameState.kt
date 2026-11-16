@@ -55,6 +55,8 @@ import kotlinx.serialization.encoding.Encoder
  * @param canAbort
  * @param clock
  * @param botToMove
+ * @param thinking A durable strength move is pending or running. Poll this game with GET.
+ * @param thinkingError Terminal move-job error, or null. An explicit bot request retries it.
  * @param opening
  * @param timeControl
  * @param createdAt
@@ -121,6 +123,14 @@ data class GymGameState (
 
     @SerialName(value = "bot_to_move")
     val botToMove: kotlin.Boolean,
+
+    /* A durable strength move is pending or running. Poll this game with GET. */
+    @SerialName(value = "thinking")
+    val thinking: kotlin.Boolean,
+
+    /* Terminal move-job error, or null. An explicit bot request retries it. */
+    @SerialName(value = "thinking_error")
+    val thinkingError: kotlin.String?,
 
     @SerialName(value = "opening")
     val opening: kotlin.String,
